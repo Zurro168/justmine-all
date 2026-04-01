@@ -1,50 +1,45 @@
 version: '3.8'
 
 services:
-  # 1. 正矿官网前端 (02_Trade_Platform)
-  justmine-site:
-    build: 
-      context: ../02_Trade_Platform
-      dockerfile: Dockerfile
-    container_name: justmine-site
+  # --- 01. 智控引擎 (JustMine Intelligence Engine) ---
+  zk-intelligence:
+    build:
+      context: ../01_Intelligence_Engine/Supply-chain-Multiagents/
+      dockerfile: openclaw-deployment/Dockerfile
+    container_name: zk-intelligence
+    env_file: .env.justmine
     restart: always
+    networks:
+      - justmine-net
+
+  # --- 02. 前端门户 (Trade Platform Portal) ---
+  zk-website:
+    build:
+      context: ../02_Trade_Platform/
+      dockerfile: Dockerfile
+    container_name: zk-website
+    ports:
+      - "5173:80"
+    restart: always
+    networks:
+      - justmine-net
+
+  # --- 03. 运维中枢 (Nginx Router & Sandbox Bridge) ---
+  zk-nginx:
+    image: nginx:latest
+    container_name: zk-nginx
     ports:
       - "80:80"
+      - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    environment:
-      - NODE_ENV=production
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - zk-intelligence
+      - zk-website
+    networks:
+      - justmine-net
 
-  # 2. 正矿智能引擎 - WeCom 接口 (01_Intelligence_Engine)
-  zk-ai-bot:
-    build: ../01_Intelligence_Engine
-    container_name: zk-ai-bot
-    restart: always
-    volumes:
-      - zk-data:/app/data
-      - zk-logs:/app/logs
-      - ../01_Intelligence_Engine/skills:/app/skills
-      - ../01_Intelligence_Engine/bots:/app/bots
-    env_file:
-      - ./.env.justmine  # 物理隔离秘钥 (SOP-V2.1.2) - 搬迁至运维中枢
-    ports:
-      - "8000:8000"
-
-  # 3. 正矿智能引擎 - 管理大屏 (01_Intelligence_Engine)
-  zk-dashboard:
-    build: ../01_Intelligence_Engine
-    container_name: zk-dashboard
-    restart: always
-    command: python bots/app_dashboard.py
-    volumes:
-      - zk-logs:/app/logs
-      - ../01_Intelligence_Engine/skills:/app/skills
-      - ../01_Intelligence_Engine/bots:/app/bots
-    env_file:
-      - ./.env.justmine  # 物理隔离秘钥 (SOP-V2.1.2)
-    ports:
-      - "3000:3000"
-
-volumes:
-  zk-data:
-  zk-logs:
+networks:
+  justmine-net:
+    driver: bridge
