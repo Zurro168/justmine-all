@@ -21,5 +21,71 @@ def chat_api():
 def health():
     return jsonify({"status": "online", "engine": "DeepSeek-V3"})
 
+@app.route('/')
+def index():
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Nexus Intelligence</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-slate-50 p-6 font-sans">
+        <div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[600px]">
+            <div class="bg-slate-900 text-white p-4 flex items-center justify-between">
+                <div class="font-bold">💬 Nexus 智能指挥终端 (DeepSeek-V3)</div>
+                <div class="flex items-center gap-2 text-xs text-emerald-400">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    核心引擎运转中
+                </div>
+            </div>
+            <div id="chat-box" class="flex-1 p-6 overflow-y-auto space-y-4 bg-slate-50">
+                <div class="p-3 bg-white rounded-xl shadow-sm border border-slate-100 text-slate-700 text-sm inline-block">
+                    🤖 [Nexus-中枢]: 战术终端已就绪。请输入「报价」或「单据」唤醒业务探针。
+                </div>
+            </div>
+            <div class="p-4 bg-white border-t border-slate-100 flex gap-2">
+                <input id="chat-input" type="text" placeholder="输入指令..." class="flex-1 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" onkeypress="if(event.key === 'Enter') send()"/>
+                <button onclick="send()" class="bg-blue-600 text-white px-6 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 transition">发送 (Send)</button>
+            </div>
+        </div>
+        <script>
+            async function send() {
+                const input = document.getElementById('chat-input');
+                const box = document.getElementById('chat-box');
+                const text = input.value.trim();
+                if(!text) return;
+                
+                // Add user message
+                box.innerHTML += `<div class="p-3 bg-blue-50 rounded-xl text-blue-800 text-sm ml-auto max-w-[80%] border border-blue-100">${text}</div>`;
+                input.value = '';
+                
+                // Show loading
+                const loadingId = 'loading-' + Date.now();
+                box.innerHTML += `<div id="${loadingId}" class="p-3 bg-white rounded-xl shadow-sm border border-slate-100 text-slate-500 text-xs inline-block animate-pulse">正在推演...</div>`;
+                box.scrollTop = box.scrollHeight;
+                
+                try {
+                    const res = await fetch('/ai-manager/api/chat', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({query: text})
+                    });
+                    const data = await res.json();
+                    document.getElementById(loadingId).remove();
+                    box.innerHTML += `<div class="p-3 bg-white rounded-xl shadow-sm border border-slate-100 text-slate-700 text-sm inline-block max-w-[80%]">🤖 ${data.reply}</div>`;
+                } catch(e) {
+                    document.getElementById(loadingId).remove();
+                    box.innerHTML += `<div class="p-3 bg-red-50 rounded-xl text-red-600 text-sm inline-block max-w-[80%] border border-red-100">⚠️ 发生系统错误: ${e.message}</div>`;
+                }
+                box.scrollTop = box.scrollHeight;
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return html
+
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=3000)
