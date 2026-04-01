@@ -20,9 +20,9 @@ cd "$BASE_DIR"
 echo "⚡ [2/4] 正在拉起 Docker 战术单元 (前端 + 引擎)..."
 
 # 强制重构并后台运行
-docker compose down
-docker compose build --no-cache
-docker compose up -d
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
 
 # 4. 结果核验
 echo "📡 [3/4] 最终链路重载中..."
