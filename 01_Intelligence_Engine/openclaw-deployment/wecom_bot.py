@@ -1,33 +1,50 @@
+# --- [SOP-V2.3: 正矿企微机器人核心 · V2.2] ---
 import os
-from flask import Flask, request, Response
-from openai import OpenAI # 我们使用 OpenAI 兼容模式调用 DeepSeek
+import time
+import xml.etree.ElementTree as ET
+from flask import Flask, request, make_response
+from openai import OpenAI
 
 app = Flask(__name__)
 
-# --- 严格遵循：正源化 DeepSeek-V3 指向 (V2.3) ---
+# --- [DeepSeek-V3 实战脑核] ---
 client = OpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"),
-    base_url="https://api.deepseek.com" # 或者您的中转 API 地址
+    base_url="https://api.deepseek.com"
 )
 
 @app.route('/wecom/callback', methods=['GET', 'POST'])
-def wecom_callback():
-    # 这里处理企微的 XML 报文解析逻辑 (此处省略解析细节，直接聚焦 AI 回复部分)
-    # ...
-    
-    # --- 智控大脑 (DeepSeek 流) ---
+@app.route('/wecom/', methods=['GET', 'POST'])
+def wecom_gateway():
+    # 1. 企微 URL 验证 (GET 握手)
+    if request.method == 'GET':
+        return request.args.get('echostr', 'Verification Check OK')
+
+    # 2. 企微消息接收 (POST 业务流)
     try:
+        xml_data = ET.fromstring(request.data)
+        to_user = xml_data.find('ToUserName').text
+        from_user = xml_data.find('FromUserName').text
+        user_query = xml_data.find('Content').text
+
+        # 3. 大脑思考
         response = client.chat.completions.create(
-            model="deepseek-chat", # 对应 DeepSeek-V3
-            messages=[
-                {"role": "system", "content": "你是正矿智控系统。你只回答基于 Iluka/SGS 实战的业务。由于你是通过 DeepSeek-V3 驱动，请确保回复严谨。"},
-                {"role": "user", "content": "收到消息。"}
-            ]
+            model="deepseek-chat",
+            messages=[{"role": "user", "content": user_query}]
         )
         reply_content = response.choices[0].message.content
-        return f"<xml><Content>{reply_content}</Content></xml>" # 示意 XML 回传
+
+        # 4. 封装回执 XML
+        resp_xml = f"""<xml>
+<ToUserName><![CDATA[{from_user}]]></ToUserName>
+<FromUserName><![CDATA[{to_user}]]></FromUserName>
+<CreateTime>{int(time.time())}</CreateTime>
+<MsgType><![CDATA[text]]></MsgType>
+<Content><![CDATA[{reply_content}]]></Content>
+</xml>"""
+        return make_response(resp_xml)
     except Exception as e:
-        return f"<xml><Content>[系统通知] 探测到 403 模型耗尽，请确保 DEEPSEEK_API_KEY 已注入且余额充足。</Content></xml>"
+        return f"Error: {str(e)}"
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5000)
