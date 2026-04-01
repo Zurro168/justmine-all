@@ -1,10 +1,10 @@
 version: '3.8'
 
 services:
-  # --- 01. 智控引擎 (JustMine Intelligence Engine) ---
+  # --- 01. 智控引擎 (对齐云端真实的扁平路径) ---
   zk-intelligence:
     build:
-      context: ../01_Intelligence_Engine/Supply-chain-Multiagents/
+      context: ../01_Intelligence_Engine/
       dockerfile: openclaw-deployment/Dockerfile
     container_name: zk-intelligence
     env_file: .env.justmine
@@ -12,11 +12,10 @@ services:
     networks:
       - justmine-net
 
-  # --- 02. 前端门户 (Trade Platform Portal) ---
+  # --- 02. 前端门户 ---
   zk-website:
     build:
       context: ../02_Trade_Platform/
-      dockerfile: Dockerfile
     container_name: zk-website
     ports:
       - "5173:80"
@@ -24,7 +23,7 @@ services:
     networks:
       - justmine-net
 
-  # --- 03. 运维中枢 (Nginx Router & Sandbox Bridge) ---
+  # --- 03. 运维中枢 ---
   zk-nginx:
     image: nginx:latest
     container_name: zk-nginx
@@ -33,7 +32,6 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./certs:/etc/nginx/certs:ro
     depends_on:
       - zk-intelligence
       - zk-website
