@@ -73,7 +73,7 @@ if __name__ == "__main__":
     import asyncio
     # 配置路径
     VAULT = "F:/Documents/Obsidian Vault"
-    LOGS = "f:/Documents/Antigravity/JustMine-System/Supply-chain-Multiagents/openclaw-deployment/logs/system.json.log"
+    LOGS = "f:/Documents/Antigravity/JustMine-all/Supply-chain-Multiagents/openclaw-deployment/logs/system.json.log"
     
     reporter = DailyIntelligenceReporter(VAULT, LOGS)
     asyncio.run(reporter.generate_tactical_report())
