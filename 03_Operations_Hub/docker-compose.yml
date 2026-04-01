@@ -1,12 +1,24 @@
 version: '3.8'
 
 services:
-  # --- 01. 智控大脑 ---
-  zk-intelligence:
+  # --- 01. 智控沙盘后台 ---
+  zk-dashboard:
     build:
       context: ../01_Intelligence_Engine/openclaw-deployment/
       dockerfile: Dockerfile
-    container_name: zk-intelligence
+    container_name: zk-dashboard
+    command: python app_dashboard.py
+    restart: always
+    networks:
+      - justmine-net
+
+  # --- 01. 企微机器人后台 ---
+  zk-ai-bot:
+    build:
+      context: ../01_Intelligence_Engine/openclaw-deployment/
+      dockerfile: Dockerfile
+    container_name: zk-ai-bot
+    command: python wecom_bot.py
     restart: always
     networks:
       - justmine-net
@@ -31,7 +43,8 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - zk-intelligence
+      - zk-dashboard
+      - zk-ai-bot
       - zk-website
     networks:
       - justmine-net
