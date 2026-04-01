@@ -1,0 +1,27 @@
+{
+  "orders": [
+    { "id": "ORD-2024001", "product": "澳洲优级锆英砂", "volume": "500 MT", "status": "运输中", "progress": 65, "vessel": "OCEAN STAR V", "eta": "2026-03-22" },
+    { "id": "ORD-2024002", "product": "莫桑比克钛精矿", "volume": "2000 MT", "status": "报关中", "progress": 85, "vessel": "SILK ROAD II", "eta": "2026-03-28" },
+    { "id": "ORD-2024003", "product": "越南锆砂", "volume": "150 MT", "status": "已到港", "progress": 100, "vessel": "LOCAL FEEDER 8", "eta": "2026-03-18" }
+  ],
+  "alerts": [
+    { "id": 1, "type": "warning", "message": "湛江港受台风影响，提货时间预计推迟48小时。" },
+    { "id": 2, "type": "info", "message": "您的提单 #BL4492 已完成电放。" }
+  ],
+  "rules": {
+    "zircon": {
+      "baseGrade": 65,
+      "gradePremium": 150,
+      "gradePenalty": 250,
+      "baseMoisture": 4,
+      "maxMoisture": 6
+    },
+    "titanium": {
+      "baseGrade": 50,
+      "gradePremium": 80,
+      "gradePenalty": 120,
+      "baseMoisture": 5,
+      "maxMoisture": 8
+    }
+  }
+}

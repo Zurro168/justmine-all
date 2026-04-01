@@ -1,0 +1,18 @@
+{
+  "kpis": [
+    { "label": "累计交易量", "value": "42,800 MT", "sub": "含锆英砂、钛精矿、金红石", "icon": "Package", "color": "blue" },
+    { "label": "累计交易额", "value": "¥3.6 亿", "sub": "2022-2024年结算金额", "icon": "TrendingUp", "color": "emerald" },
+    { "label": "在途物资", "value": "2,650 MT", "sub": "3 批次 · 3国来源", "icon": "Ship", "color": "purple" },
+    { "label": "合作伙伴数", "value": "18 家", "sub": "覆盖澳洲/非洲/东南亚", "icon": "Globe", "color": "amber" }
+  ],
+  "origins": [
+    { "country": "澳大利亚", "flag": "🇦🇺", "product": "锆英砂", "pct": 55, "color": "bg-blue-500" },
+    { "country": "莫桑比克", "flag": "🇲🇿", "product": "钛精矿", "pct": 35, "color": "bg-purple-500" },
+    { "country": "越南", "flag": "🇻🇳", "product": "锆砂", "pct": 10, "color": "bg-emerald-500" }
+  ],
+  "ports": [
+    { "label": "钦州港", "sub": "主要到港" },
+    { "label": "湛江港", "sub": "公司总部" },
+    { "label": "连云港", "sub": "内贸中转" }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+    "market_indices": {
+        "000360": "锆产业指数 (Zircon Industry)",
+        "000300": "钛矿综合指数 (Ti-Ore Composite)",
+        "000310": "四川钛精矿现货 (Sichuan Ti-Ore)",
+        "000330": "海绵钛现货指数 (Titanium Sponge)",
+        "000311": "钛白粉综合指数 (TiO2 Index)"
+    },
+    "history_years": 3,
+    "schedule": {
+        "hour": 8,
+        "minute": 30
+    },
+    "output_paths": {
+        "data_dir": "../data/scout",
+        "history_csv": "../data/scout/market_indices_history.csv",
+        "excel_dir": "../data/scout/excel",
+        "report_dir": "../logs/scout_reports"
+    }
+}

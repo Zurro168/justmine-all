@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+
+<meta charset="UTF-8">
+<title>企业组织架构</title>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+
+<style>
+
+body{
+font-family:"Microsoft YaHei";
+margin:0;
+background:#f4f6f9;
+}
+
+#toolbar{
+padding:10px;
+background:white;
+box-shadow:0 2px 5px rgba(0,0,0,0.1);
+}
+
+#search{
+width:200px;
+padding:6px;
+}
+
+svg{
+width:100%;
+height:900px;
+cursor:move;
+}
+
+.node rect{
+rx:6;
+ry:6;
+stroke-width:2;
+}
+
+.node text{
+font-size:13px;
+text-anchor:middle;
+dominant-baseline:middle;
+pointer-events:none;
+}
+
+.link{
+fill:none;
+stroke:#999;
+stroke-width:2px;
+}
+
+.tooltip{
+
+position:absolute;
+background:white;
+padding:10px;
+border-radius:6px;
+box-shadow:0 2px 8px rgba(0,0,0,0.2);
+display:none;
+
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="toolbar">
+
+搜索人员：
+<input id="search" placeholder="输入岗位名称">
+
+</div>
+
+<svg id="chart"></svg>
+
+<div id="tooltip" class="tooltip"></div>
+
+<script>
+
+const orgData = {
+
+name:"正矿供应链（广东）有限公司",
+type:"title",
+
+children:[
+
+{
+name:"股东会",
+type:"purple",
+
+children:[
+
+{
+name:"董事长",
+type:"purple",
+
+children:[
+
+{
+name:"总经理",
+type:"blue",
+
+children:[
+
+{
+name:"副总经理",
+type:"blue",
+
+children:[
+
+{
+name:"风险管理部",
+type:"green",
+
+children:[
+{name:"风控主管",type:"yellow"}
+]
+
+},
+
+{
+name:"市场管理部",
+type:"green",
+
+children:[
+
+{
+name:"市场经理",
+type:"red",
+
+children:[
+
+{
+name:"单证组",
+type:"yellow",
+
+children:[
+
+{
+name:"单证主管",
+type:"yellow",
+
+children:[
+{name:"单证专员",type:"yellow"}
+]
+
+}
+
+]
+
+},
+
+{
+name:"采购组",
+type:"yellow",
+
+children:[
+{name:"国际贸易专员",type:"yellow"}
+]
+}
+
+]
+
+}
+
+]
+
+},
+
+{
+name:"财务管理部",
+type:"green",
+
+children:[
+
+{
+name:"财务经理",
+type:"red",
+
+children:[
+{name:"会计",type:"yellow"},
+{name:"出纳",type:"yellow"}
+]
+
+}
+
+]
+
+},
+
+{
+name:"综合管理部",
+type:"green",
+
+children:[
+
+{
+name:"行政人事经理",
+type:"red",
+
+children:[
+{name:"行政人事专员",type:"yellow"},
+{name:"外勤专员",type:"yellow"}
+]
+
+}
+
+]
+
+}
+
+]
+
+}
+
+]
+
+}
+
+]
+
+}
+
+]
+
+}
+
+const svg = d3.select("#chart")
+
+const width = window.innerWidth
+const height = 900
+
+const g = svg.append("g")
+
+svg.call(
+d3.zoom()
+.scaleExtent([0.3,2])
+.on("zoom",(event)=>{
+g.attr("transform",event.transform)
+})
+)
+
+const tree = d3.tree().size([width-200,height-200])
+
+let root = d3.hierarchy(orgData)
+
+update()
+
+function update(){
+
+const treeData = tree(root)
+
+const nodes = treeData.descendants()
+const links = treeData.links()
+
+nodes.forEach(d=>{
+d.y = d.depth * 150
+})
+
+g.selectAll("*").remove()
+
+g.selectAll(".link")
+.data(links)
+.enter()
+.append("path")
+.attr("class","link")
+.attr("d",
+d3.linkVertical()
+.x(d=>d.x)
+.y(d=>d.y)
+)
+
+const node = g.selectAll(".node")
+.data(nodes)
+.enter()
+.append("g")
+.attr("class","node")
+.attr("transform",d=>"translate("+d.x+","+d.y+")")
+.on("click",toggle)
+.on("mouseover",showTooltip)
+.on("mouseout",hideTooltip)
+
+node.append("rect")
+.attr("width",140)
+.attr("height",40)
+.attr("x",-70)
+.attr("y",-20)
+.attr("fill",d=>color(d.data.type))
+
+node.append("text")
+.text(d=>d.data.name)
+
+}
+
+function toggle(event,d){
+
+if(d.children){
+d._children=d.children
+d.children=null
+}else{
+d.children=d._children
+d._children=null
+}
+
+update()
+
+}
+
+function color(type){
+
+switch(type){
+
+case "title": return "#5B7BE4"
+case "purple": return "#C8B6FF"
+case "blue": return "#6EA8FF"
+case "green": return "#A9DFBF"
+case "red": return "#F1948A"
+case "yellow": return "#F9E79F"
+
+default: return "#DDD"
+
+}
+
+}
+
+function showTooltip(event,d){
+
+const tooltip=document.getElementById("tooltip")
+
+tooltip.style.display="block"
+
+tooltip.innerHTML=
+
+"<b>"+d.data.name+"</b><br>"+
+"岗位信息可在后台配置"
+
+tooltip.style.left=event.pageX+10+"px"
+tooltip.style.top=event.pageY+10+"px"
+
+}
+
+function hideTooltip(){
+
+document.getElementById("tooltip").style.display="none"
+
+}
+
+document.getElementById("search")
+.addEventListener("input",function(){
+
+const keyword=this.value
+
+g.selectAll(".node rect")
+.attr("stroke",d=>{
+
+if(keyword && d.data.name.includes(keyword)){
+return "red"
+}
+
+return "none"
+
+})
+
+})
+
+</script>
+
+</body>
+</html>

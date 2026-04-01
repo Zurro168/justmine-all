@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # 1. 正矿官网前端 (02_Trade_Platform)
+  justmine-site:
+    build: 
+      context: ../02_Trade_Platform
+      dockerfile: Dockerfile
+    container_name: justmine-site
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    environment:
+      - NODE_ENV=production
+
+  # 2. 正矿智能引擎 - WeCom 接口 (01_Intelligence_Engine)
+  zk-ai-bot:
+    build: ../01_Intelligence_Engine
+    container_name: zk-ai-bot
+    restart: always
+    volumes:
+      - zk-data:/app/data
+      - zk-logs:/app/logs
+      - ../01_Intelligence_Engine/skills:/app/skills
+      - ../01_Intelligence_Engine/bots:/app/bots
+    env_file:
+      - ./.env.justmine  # 物理隔离秘钥 (SOP-V2.1.2) - 搬迁至运维中枢
+    ports:
+      - "8000:8000"
+
+  # 3. 正矿智能引擎 - 管理大屏 (01_Intelligence_Engine)
+  zk-dashboard:
+    build: ../01_Intelligence_Engine
+    container_name: zk-dashboard
+    restart: always
+    command: python bots/app_dashboard.py
+    volumes:
+      - zk-logs:/app/logs
+      - ../01_Intelligence_Engine/skills:/app/skills
+      - ../01_Intelligence_Engine/bots:/app/bots
+    env_file:
+      - ./.env.justmine  # 物理隔离秘钥 (SOP-V2.1.2)
+    ports:
+      - "3000:3000"
+
+volumes:
+  zk-data:
+  zk-logs:

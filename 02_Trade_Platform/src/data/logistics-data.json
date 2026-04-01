@@ -1,0 +1,94 @@
+{
+  "indices": {
+    "bdi": { "value": 1842, "change": "+12", "trend": "up" },
+    "ccfi": { "value": 1756.4, "change": "+24.5", "trend": "up" },
+    "scfi": { "value": 3280.1, "change": "-15.2", "trend": "down" },
+    "congestion": { "qinzhou": { "value": 0.82, "label": "流畅" } }
+  },
+  "routes": [
+    {
+      "id": "R001",
+      "name": "澳洲 PORT HEDLAND → 钦州港",
+      "vessel": "OCEAN STAR V",
+      "product": "优级锆英砂",
+      "volume": "55,000 MT",
+      "speed": "13.5 kts",
+      "eta": "2026-03-22",
+      "progress": 68,
+      "color": "#3b82f6",
+      "vesselType": "Bulk Carrier",
+      "points": [[-31.95, 115.86], [-25, 118], [-15, 128], [-5, 133], [5, 128], [15, 118], [19, 112], [21.5, 109.5]],
+      "currentPos": [15, 118],
+      "stats": { "heading": "345°", "draught": "12.4m", "status": "Under Way" }
+    },
+    {
+      "id": "R002",
+      "name": "莫桑比克 BEIRA → 连云港",
+      "vessel": "SILK ROAD II",
+      "product": "优质钛精矿",
+      "volume": "42,300 MT",
+      "speed": "11.8 kts",
+      "eta": "2026-03-28",
+      "progress": 42,
+      "color": "#8b5cf6",
+      "vesselType": "Handy Bulk",
+      "points": [[-25.96, 32.58], [-20, 45], [-10, 58], [5, 65], [12, 72], [18, 82], [22, 95], [25, 108], [34.7, 119.2]],
+      "currentPos": [12, 72],
+      "stats": { "heading": "042°", "draught": "10.8m", "status": "Under Way" }
+    },
+    {
+      "id": "R003",
+      "name": "越南 QUINHON → 湛江港",
+      "vessel": "VIET MINERAL 8",
+      "product": "锆英砂(H)",
+      "volume": "1,200 MT",
+      "speed": "9.2 kts",
+      "eta": "2026-03-18",
+      "progress": 92,
+      "color": "#10b981",
+      "vesselType": "General Cargo",
+      "points": [[13.8, 109.2], [16, 111], [18, 113.5], [21.2, 110.3]],
+      "currentPos": [18, 113.5],
+      "stats": { "heading": "015°", "draught": "4.5m", "status": "Under Way" }
+    },
+    {
+      "id": "R004",
+      "name": "尼日利亚 LAGOS → 湛江港",
+      "vessel": "MSC NIGERIA",
+      "product": "集装箱 (矿物样品)",
+      "volume": "2,400 TEU",
+      "speed": "18.2 kts",
+      "eta": "2026-04-05",
+      "progress": 15,
+      "color": "#f97316",
+      "vesselType": "Container Ship",
+      "points": [[6.45, 3.38], [-15, 10], [-34, 18], [-30, 45], [-10, 60], [5, 80], [2, 102], [21.2, 110.3]],
+      "currentPos": [-15, 10],
+      "stats": { "heading": "165°", "draught": "14.2m", "status": "Under Way" }
+    },
+    {
+      "id": "R005",
+      "name": "塞拉利昂 FREETOWN → 湛江港",
+      "vessel": "MAERSK SIERRA",
+      "product": "集装箱 (金红石精矿)",
+      "volume": "1,800 TEU",
+      "speed": "16.5 kts",
+      "eta": "2026-04-12",
+      "progress": 8,
+      "color": "#ec4899",
+      "vesselType": "Container Ship",
+      "points": [[8.48, -13.23], [-10, -5], [-35, 20], [-25, 55], [0, 75], [2, 102], [21.2, 110.3]],
+      "currentPos": [-10, -5],
+      "stats": { "heading": "142°", "draught": "11.5m", "status": "Under Way" }
+    }
+  ],
+  "ports": [
+    { "name": "钦州港", "pos": [21.5, 109.5], "type": "dest", "alpha": "0.82", "status": "Green" },
+    { "name": "连云港", "pos": [34.7, 119.2], "type": "dest", "alpha": "1.24", "status": "Orange" },
+    { "name": "湛江港", "pos": [21.2, 110.3], "type": "dest", "alpha": "0.95", "status": "Green" },
+    { "name": "Beira (MZ)", "pos": [-25.96, 32.58], "type": "origin", "status": "Normal" },
+    { "name": "Port Hedland (AU)", "pos": [-31.95, 115.86], "type": "origin", "status": "Normal" },
+    { "name": "Lagos (NG)", "pos": [6.45, 3.38], "type": "origin", "status": "Normal" },
+    { "name": "Freetown (SL)", "pos": [8.48, -13.23], "type": "origin", "status": "Normal" }
+  ]
+}

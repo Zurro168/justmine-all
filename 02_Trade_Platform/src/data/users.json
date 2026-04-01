@@ -1,0 +1,56 @@
+[
+  {
+    "username": "admin",
+    "password": "zk2024",
+    "name": "系统管理员",
+    "role": "ADMIN",
+    "category": "EMPLOYEE",
+    "avatar": "AD",
+    "company": "正矿供应链"
+  },
+  {
+    "username": "js",
+    "password": "zk2024",
+    "name": "王国东",
+    "role": "VICE_GM",
+    "category": "EMPLOYEE",
+    "avatar": "WG",
+    "company": "正矿供应链"
+  },
+  {
+    "username": "ops",
+    "password": "zk2024",
+    "name": "张运营",
+    "role": "OPERATIONS",
+    "category": "EMPLOYEE",
+    "avatar": "ZY",
+    "company": "正矿供应链"
+  },
+  {
+    "username": "iluka_sales",
+    "password": "zk2024",
+    "name": "Mark Wilson",
+    "role": "SALES_DIRECTOR",
+    "category": "UPSTREAM",
+    "avatar": "MW",
+    "company": "Iluka Resources"
+  },
+  {
+    "username": "ceramics_buyer",
+    "password": "zk2024",
+    "name": "李经理",
+    "role": "PURCHASING_MGR",
+    "category": "DOWNSTREAM",
+    "avatar": "LJ",
+    "company": "佛山宏陶陶瓷"
+  },
+  {
+    "username": "logistics_agent",
+    "password": "zk2024",
+    "name": "王关务",
+    "role": "CUSTOMS_BROKER",
+    "category": "SERVICE",
+    "avatar": "WG",
+    "company": "中外运物流"
+  }
+]

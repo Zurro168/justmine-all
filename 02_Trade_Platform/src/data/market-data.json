@@ -1,0 +1,17 @@
+{
+  "last_update": "2026-03-31 23:45",
+  "source": "中国铁合金网 (Ferroalloy Online)",
+  "zirconium": {
+    "au_grade_a": { "price": 10480, "unit": "元/吨", "change": "+1.25%", "trend": "up" },
+    "vn_grade_h": { "price": 9850, "unit": "元/吨", "change": "+0.8%", "trend": "up" }
+  },
+  "titanium": {
+    "mz_concentrate": { "price": 2150, "unit": "元/吨", "change": "+6.9%", "trend": "up" },
+    "hk_ilmenite": { "price": 1850, "unit": "元/吨", "change": "+1.5%", "trend": "up" }
+  },
+  "shipping": {
+    "bdi": { "value": 1842, "change": "+12", "trend": "up" },
+    "ccfi": { "value": 1756.4, "change": "+24.5", "trend": "up" },
+    "scfi": { "value": 3280.1, "change": "-15.2", "trend": "down" }
+  }
+}

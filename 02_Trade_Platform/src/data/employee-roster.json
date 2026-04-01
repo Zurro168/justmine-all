@@ -1,0 +1,23 @@
+[
+  {
+    "name": "张三",
+    "englishName": "San Zhang",
+    "department": "市场管理部",
+    "role": "市场专员",
+    "isActivated": false
+  },
+  {
+    "name": "李四",
+    "englishName": "Si Li",
+    "department": "风险管理部",
+    "role": "风控专员",
+    "isActivated": false
+  },
+  {
+    "name": "王五",
+    "englishName": "Five Wang",
+    "department": "财务管理部",
+    "role": "会计",
+    "isActivated": false
+  }
+]
