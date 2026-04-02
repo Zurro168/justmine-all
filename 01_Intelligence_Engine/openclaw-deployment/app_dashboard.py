@@ -12,7 +12,7 @@ import requests
 @app.route('/api/chat', methods=['POST'])
 def chat_api():
     query = request.json.get('query', '').lower()
-    reply = "【Nexus 智能中枢】指令接收。请问是查询[报价]还是审核[单据]？"
+    reply = "【Jaguar 智能中枢】指令接收。请问是查询[报价]还是审核[单据]？"
     if ".pdf" in query or "单据" in query:
         reply = "【Docu-Checker】当前处于待命状态。请上传 SGS 扫描件获取真实报告。"
     elif "iluka" in query or "报价" in query:
@@ -25,7 +25,7 @@ def chat_api():
             payload = {
                 "msgtype": "text",
                 "text": {
-                    "content": f"🚨 [Nexus 高管内参]\n来自大屏指挥官的最新指令查询：\n{reply}",
+                    "content": f"🚨 [Jaguar 高管内参]\n来自大屏指挥官的最新指令查询：\n{reply}",
                     "mentioned_list": ["@all"]
                 }
             }
@@ -46,13 +46,13 @@ def index():
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Nexus Intelligence</title>
+        <title>Jaguar Intelligence</title>
         <script src="https://cdn.tailwindcss.com"></script>
     </head>
     <body class="bg-slate-50 p-6 font-sans">
         <div class="max-w-3xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[600px]">
             <div class="bg-slate-900 text-white p-4 flex items-center justify-between">
-                <div class="font-bold">💬 Nexus 智能指挥终端 (DeepSeek-V3)</div>
+                <div class="font-bold">💬 Jaguar 智能指挥终端 (DeepSeek-V3)</div>
                 <div class="flex items-center gap-2 text-xs text-emerald-400">
                     <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                     核心引擎运转中
@@ -60,7 +60,7 @@ def index():
             </div>
             <div id="chat-box" class="flex-1 p-6 overflow-y-auto space-y-4 bg-slate-50">
                 <div class="p-3 bg-white rounded-xl shadow-sm border border-slate-100 text-slate-700 text-sm inline-block">
-                    🤖 [Nexus-中枢]: 战术终端已就绪。请输入「报价」或「单据」唤醒业务探针。
+                    🤖 [Jaguar-中枢]: 战术终端已就绪。请输入「报价」或「单据」唤醒业务探针。
                 </div>
             </div>
             <div class="p-4 bg-white border-t border-slate-100 flex gap-2">

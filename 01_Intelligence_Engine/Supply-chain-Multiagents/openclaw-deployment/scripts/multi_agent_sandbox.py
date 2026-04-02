@@ -17,8 +17,8 @@ def print_header():
     print(" 3. 发送海外采购意向 (验证 Negotiator 谈判助手模式)")
     print("="*60)
 
-def nexus_router(user_input):
-    print("\n[🧠 智控大脑 (Nexus)] 正在接收消息并进行意图识别...")
+def jaguar_router(user_input):
+    print("\n[🧠 智控大脑 (Jaguar)] 正在接收消息并进行意图识别...")
     time.sleep(1)
     
     user_input_lower = user_input.lower()
@@ -62,7 +62,7 @@ def main():
         if not user_input.strip():
             continue
             
-        target_agent = nexus_router(user_input)
+        target_agent = jaguar_router(user_input)
         
         if target_agent == "Docu-Checker":
             agent_docu_checker(user_input)
