@@ -43,6 +43,7 @@ const NAV_GROUPS = [
       { id: 'settlement', label: '检验与结算', icon: BarChart3, desc: '品位扣减结算看板 · 自动对账' },
       { id: 'riskcontrol', label: '资金风控中心', icon: Shield, desc: 'TT/LC 额度看板 · 付款节点甘特图' },
       { id: 'aiconsole', label: 'AI 智能总控', icon: Terminal, desc: 'OpenClaw 系统全链路运维监控' },
+      { id: 'sandbox', label: '模拟对话沙盒', icon: Terminal, desc: '内网全员公共测试群，云端双工同步' },
     ]
   },
 ];

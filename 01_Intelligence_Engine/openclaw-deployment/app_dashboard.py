@@ -8,6 +8,11 @@ app = Flask(__name__)
 CORS(app)
 
 import requests
+import uuid
+import datetime
+
+# In-memory store for sandbox messages
+sandbox_messages = []
 
 @app.route('/api/chat', methods=['POST'])
 def chat_api():
@@ -34,6 +39,54 @@ def chat_api():
             print(f"WeCom Broadcast Failed: {e}")
 
     return jsonify({"reply": reply})
+
+@app.route('/api/sandbox/messages', methods=['GET'])
+def get_sandbox_messages():
+    return jsonify({"messages": sandbox_messages})
+
+@app.route('/api/sandbox/send', methods=['POST'])
+def send_sandbox_message():
+    data = request.json
+    user_msg = data.get('message', '').strip()
+    nickname = data.get('nickname', '匿名同事')
+    
+    if not user_msg:
+        return jsonify({"error": "Message is empty"}), 400
+
+    trace_id = "TRC-" + str(uuid.uuid4())[:8].upper()
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+
+    # Add user message
+    sandbox_messages.append({
+        "id": str(uuid.uuid4()),
+        "trace_id": trace_id,
+        "type": "user",
+        "sender": nickname,
+        "text": user_msg,
+        "timestamp": timestamp
+    })
+
+    # AI Logic based on chat_sandbox_v2.py
+    query = user_msg.lower()
+    if "行情" in query or "价格" in query:
+        reply = "【情报引擎】当前正在分析 Iluka 鋯英砂行情，最新报价约为 2200 USD/吨，趋势稳定。"
+    elif "状态" in query or "健康" in query:
+        reply = "【系统中枢】当前 01/02/03 模块运行正常，DeepSeek 数据链路 100% 畅通。"
+    else:
+        reply = f"【正矿机器人】收到指令：'{user_msg}'。我已经将其存入记忆库，正在调取供应链历史记录。"
+
+    # Add AI Reply
+    sandbox_messages.append({
+        "id": str(uuid.uuid4()),
+        "trace_id": trace_id,
+        "type": "ai",
+        "sender": "正矿AI",
+        "text": reply,
+        "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
+    })
+
+    # Return success
+    return jsonify({"status": "success", "trace_id": trace_id})
 
 @app.route('/health')
 def health():

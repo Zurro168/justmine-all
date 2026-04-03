@@ -15,6 +15,7 @@ const DocumentsPage  = lazy(() => import('./pages/Documents'));
 const RiskControlPage = lazy(() => import('./pages/RiskControl'));
 const OrgChartPage   = lazy(() => import('./pages/OrgChart'));
 const AIConsole      = lazy(() => import('./pages/AIConsole'));
+const SandboxPage    = lazy(() => import('./pages/Sandbox'));
 
 // Error Boundary to catch and display any runtime crashes visibly
 class ErrorBoundary extends React.Component {
@@ -83,6 +84,7 @@ const App = () => {
             {activeTab === 'supplywatch' && <MarketPage mode="supply" />}
             {activeTab === 'settlement'  && <DashboardPage />}
             {activeTab === 'aiconsole'   && <AIConsole />}
+            {activeTab === 'sandbox'     && <SandboxPage />}
           </Suspense>
         </ErrorBoundary>
       </main>
