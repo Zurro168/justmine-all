@@ -78,6 +78,10 @@ async def generate_daily_scout_report():
     wecom_webhook = os.getenv("WECOM_WEBHOOK_URL")
     if wecom_webhook and wecom_webhook.startswith("http"):
         try:
+            wecom_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
             payload = {
                 "msgtype": "markdown",
                 "markdown": {
@@ -85,7 +89,7 @@ async def generate_daily_scout_report():
                 }
             }
             async with httpx.AsyncClient() as client:
-                res = await client.post(wecom_webhook, json=payload, timeout=10.0)
+                res = await client.post(wecom_webhook, headers=wecom_headers, json=payload, timeout=10.0)
                 if res.status_code == 200:
                     print(f"[{datetime.now()}] Report successfully pushed to WeCom.")
                 else:
