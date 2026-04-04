@@ -6,6 +6,7 @@ python-dotenv
 httpx
 requests
 # 🔍 核心分析与调度库
+playwright
 apscheduler
 pandas
 openpyxl
