@@ -1,5 +1,5 @@
 # --- 严格遵循 SOP-V2.1: 使用 Playwright 胖镜像 (预装所有浏览器依赖) ---
-FROM mcr.microsoft.com/playwright/python:v1.45.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
 
 WORKDIR /app
 
