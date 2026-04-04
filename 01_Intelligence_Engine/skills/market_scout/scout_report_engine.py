@@ -78,7 +78,6 @@ async def generate_daily_scout_report():
     wecom_webhook = os.getenv("WECOM_WEBHOOK_URL")
     if wecom_webhook and wecom_webhook.startswith("http"):
         try:
-            # 这里的 payload 根据 WeCom 官方文档，markdown 格式最适合我们的行情分析
             payload = {
                 "msgtype": "markdown",
                 "markdown": {
@@ -95,6 +94,51 @@ async def generate_daily_scout_report():
             print(f"[{datetime.now()}] WeCom push Exception: {e}")
     else:
         print(f"[{datetime.now()}] WECOM_WEBHOOK_URL not set or invalid, skipping push.")
+
+    # 🚀 新增: 自动同步到 Notion (AI Intelligence Hub)
+    notion_token = os.getenv("NOTION_API_SECRET")
+    notion_db = os.getenv("NOTION_CRM_DATABASE_ID") # 使用现有的 CRM 库或指定报告专用 ID
+    
+    if notion_token and notion_db:
+        try:
+            headers = {
+                "Authorization": f"Bearer {notion_token}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json"
+            }
+            # 构建 Notion Block 数据 (简单映射 Markdown 行)
+            blocks = []
+            for line in final_report.split('\n'):
+                if not line.strip(): continue
+                if line.startswith("# "):
+                    blocks.append({"object": "block", "type": "heading_1", "heading_1": {"rich_text": [{"text": {"content": line[2:]}}]}})
+                elif line.startswith("## "):
+                    blocks.append({"object": "block", "type": "heading_2", "heading_2": {"rich_text": [{"text": {"content": line[3:]}}]}})
+                elif line.startswith("- "):
+                    blocks.append({"object": "block", "type": "bulleted_list_item", "bulleted_list_item": {"rich_text": [{"text": {"content": line[2:]}}]}})
+                else:
+                    blocks.append({"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"text": {"content": line}}]}})
+            
+            notion_payload = {
+                "parent": {"database_id": notion_db},
+                "properties": {
+                    "Name": {"title": [{"text": {"content": f"Scout 报告 - {latest_date.strftime('%Y-%m-%d')}"}}]},
+                    "Type": {"select": {"name": "Scout 行情"}}
+                },
+                "children": blocks[:100] # Notion 限制单次插入 block 数
+            }
+            
+            async with httpx.AsyncClient() as client:
+                res = await client.post("https://api.notion.com/v1/pages", headers=headers, json=notion_payload, timeout=20.0)
+                if res.status_code == 200:
+                    print(f"[{datetime.now()}] Report successfully pushed to Notion.")
+                else:
+                    # 如果 Database 没有 Type 字段可能会报错，我们这里打印详情
+                    print(f"[{datetime.now()}] Notion push failed: {res.status_code} - {res.text}")
+        except Exception as e:
+            print(f"[{datetime.now()}] Notion push Exception: {e}")
+    else:
+        print(f"[{datetime.now()}] Notion credentials missing, skipping sync.")
         
     return final_report
 
