@@ -16,7 +16,7 @@ async def daily_task_flow():
     
     # 1. Collect latest data
     # We update back to 3 years just in case, but daily it's fast
-    success = run_scout_collection(years=3)
+    success = await run_scout_collection(years=3)
     
     if success:
         # 2. Generate Daily Report (Markdown + AI Insight)
