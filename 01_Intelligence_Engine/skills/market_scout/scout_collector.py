@@ -1,4 +1,3 @@
-import requests
 import pandas as pd
 import json
 from bs4 import BeautifulSoup
@@ -21,31 +20,27 @@ HISTORY_FILE = CONFIG["output_paths"].get("history_csv", os.path.join(DATA_DIR, 
 INDICES = CONFIG.get("market_indices", {})
 HISTORY_YEARS = CONFIG.get("history_years", 3)
 
-from playwright.async_api import async_playwright
+import httpx
+
+# 模拟浏览器请求头，防止被 index.cnfeol.com 拦截
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://index.cnfeol.com/",
+}
 
 async def fetch_page(index_code, page_index, start_date, end_date):
-    """使用 Playwright 异步模拟浏览器请求 (防止被 index.cnfeol.com 拦截)"""
+    """使用 httpx 异步 HTTP 请求获取行情 JSON 数据（轻量替代 Playwright）"""
     url = f"https://index.cnfeol.com/IndexData.ashx?indexcode={index_code}&pageindex={page_index}&startDate={start_date}&endDate={end_date}"
     
-    async with async_playwright() as p:
-        # 腾讯云生产环境必须开启 headless
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
-        try:
-            # 访问 URL 并等待响应 (如果是 ASHX 也要看返回内容)
-            await page.goto(url, wait_until="networkidle", timeout=30000)
-            
-            # 获取文本内容 (假设它是 JSON)
-            content = await page.locator("body").inner_text()
-            data = json.loads(content)
+    try:
+        async with httpx.AsyncClient(headers=_HEADERS, timeout=30.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
             return data
-        except Exception as e:
-            print(f"[{datetime.now()}] Playwright Error fetching {index_code}: {e}")
-        finally:
-            await browser.close()
+    except Exception as e:
+        print(f"[{datetime.now()}] HTTP Error fetching {index_code} page {page_index}: {e}")
     return None
 
 def parse_table_html(html):
