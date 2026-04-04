@@ -5,3 +5,9 @@ gunicorn==21.2.0
 python-dotenv
 httpx
 requests
+# 🔍 核心分析与调度库
+apscheduler
+pandas
+openpyxl
+beautifulsoup4
+lxml

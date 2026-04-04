@@ -73,6 +73,28 @@ async def generate_daily_scout_report():
     report_path = os.path.join(REPORTS_DIR, f"scout_daily_{latest_date.strftime('%Y%m%d')}.md")
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(final_report)
+    
+    # 🔍 新增: 自动推送到企微 Webhook
+    wecom_webhook = os.getenv("WECOM_WEBHOOK_URL")
+    if wecom_webhook and wecom_webhook.startswith("http"):
+        try:
+            # 这里的 payload 根据 WeCom 官方文档，markdown 格式最适合我们的行情分析
+            payload = {
+                "msgtype": "markdown",
+                "markdown": {
+                    "content": final_report
+                }
+            }
+            async with httpx.AsyncClient() as client:
+                res = await client.post(wecom_webhook, json=payload, timeout=10.0)
+                if res.status_code == 200:
+                    print(f"[{datetime.now()}] Report successfully pushed to WeCom.")
+                else:
+                    print(f"[{datetime.now()}] WeCom push failed: {res.status_code} - {res.text}")
+        except Exception as e:
+            print(f"[{datetime.now()}] WeCom push Exception: {e}")
+    else:
+        print(f"[{datetime.now()}] WECOM_WEBHOOK_URL not set or invalid, skipping push.")
         
     return final_report
 

@@ -20,26 +20,31 @@ HISTORY_FILE = CONFIG["output_paths"].get("history_csv", os.path.join(DATA_DIR, 
 INDICES = CONFIG.get("market_indices", {})
 HISTORY_YEARS = CONFIG.get("history_years", 3)
 
+from playwright.sync_api import sync_playwright
+
 def fetch_page(index_code, page_index, start_date, end_date):
-    url = "https://index.cnfeol.com/IndexData.ashx"
-    params = {
-        "indexcode": index_code,
-        "pageindex": page_index,
-        "startDate": start_date,
-        "endDate": end_date
-    }
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Referer": "https://index.cnfeol.com/series/ti.aspx"
-    }
+    """使用 Playwright 模拟浏览器请求 (防止被 index.cnfeol.com 拦截)"""
+    url = f"https://index.cnfeol.com/IndexData.ashx?indexcode={index_code}&pageindex={page_index}&startDate={start_date}&endDate={end_date}"
     
-    try:
-        resp = requests.get(url, params=params, headers=headers, timeout=20)
-        if resp.status_code == 200:
-            data = resp.json()
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        try:
+            # 模拟真实用户的 User-Agent
+            page.set_extra_http_headers({
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            })
+            # 访问 URL 并等待响应 (如果是 ASHX 也要看返回内容)
+            page.goto(url, wait_until="networkidle")
+            
+            # 获取文本内容 (假设它是 JSON)
+            content = page.locator("body").inner_text()
+            data = json.loads(content)
             return data
-    except Exception as e:
-        print(f"Error fetching {index_code} page {page_index}: {e}")
+        except Exception as e:
+            print(f"Playwright Error fetching {index_code}: {e}")
+        finally:
+            browser.close()
     return None
 
 def parse_table_html(html):

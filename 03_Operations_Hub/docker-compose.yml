@@ -4,22 +4,37 @@ services:
   # --- 01. 智控沙盘后台 ---
   zk-dashboard:
     build:
-      context: ../01_Intelligence_Engine/openclaw-deployment/
-      dockerfile: Dockerfile
+      context: ../01_Intelligence_Engine/
+      dockerfile: openclaw-deployment/Dockerfile
     container_name: zk-dashboard
-    command: python app_dashboard.py
+    command: python openclaw-deployment/app_dashboard.py
     restart: always
+    env_file: .env
     networks:
       - justmine-net
 
   # --- 01. 企微机器人后台 ---
   zk-ai-bot:
     build:
-      context: ../01_Intelligence_Engine/openclaw-deployment/
-      dockerfile: Dockerfile
+      context: ../01_Intelligence_Engine/
+      dockerfile: openclaw-deployment/Dockerfile
     container_name: zk-ai-bot
-    command: python wecom_bot.py
+    command: python openclaw-deployment/wecom_bot.py
     restart: always
+    env_file: .env
+    networks:
+      - justmine-net
+
+  # --- 01. 行情早报定时任务 (Scout-Scheduler) ---
+  zk-scout-scheduler:
+    build:
+      context: ../01_Intelligence_Engine/
+      dockerfile: openclaw-deployment/Dockerfile
+    container_name: zk-scout-scheduler
+    # 指向准确的定时任务脚本
+    command: python skills/market_scout/scout_scheduler.py
+    restart: always
+    env_file: .env
     networks:
       - justmine-net
 
