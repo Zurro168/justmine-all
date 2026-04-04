@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import os
 import sys
 import time
+import asyncio
 
 if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
