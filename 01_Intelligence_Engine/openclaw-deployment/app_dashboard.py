@@ -1,8 +1,16 @@
-# --- [SOP-V2.3: 正矿智控系统 · 仪表盘核心 V2.2] ---
+# --- [SOP-V2.3: 正矿智控系统 · 仪表盘核心 V2.3] ---
 import os
 import json
+import logging
+from pathlib import Path
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='{"time":"%(asctime)s","level":"%(levelname)s","module":"%(module)s","message":"%(message)s"}'
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": os.getenv("ALLOWED_ORIGINS", "*")}})
@@ -11,19 +19,36 @@ import requests
 import uuid
 import datetime
 
-# In-memory store for sandbox messages
-sandbox_messages = []
+DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR.mkdir(exist_ok=True)
+MESSAGES_FILE = DATA_DIR / "sandbox_messages.json"
+
+def load_messages():
+    if MESSAGES_FILE.exists():
+        try:
+            with open(MESSAGES_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return []
+    return []
+
+def save_messages(messages):
+    try:
+        with open(MESSAGES_FILE, 'w') as f:
+            json.dump(messages[-500:], f)
+
+sandbox_messages = load_messages()
 
 @app.route('/api/chat', methods=['POST'])
 def chat_api():
     query = request.json.get('query', '').lower()
+    logger.info(f"Chat query: {query}")
     reply = "【Jaguar 智能中枢】指令接收。请问是查询[报价]还是审核[单据]？"
     if ".pdf" in query or "单据" in query:
         reply = "【Docu-Checker】当前处于待命状态。请上传 SGS 扫描件获取真实报告。"
     elif "iluka" in query or "报价" in query:
         reply = "【Market-Scout】正在侦测本地数据源...当前深层爬虫尚未开启，本周行情请参照官网报盘。"
-    
-    # [战术 A]: 同步将这句最高指令，发射到企微的长链接群播报喇叭里！
+
     wecom_webhook = os.getenv("WECOM_WEBHOOK_URL")
     if wecom_webhook and wecom_webhook.startswith("http"):
         try:
@@ -36,7 +61,7 @@ def chat_api():
             }
             requests.post(wecom_webhook, json=payload, timeout=5)
         except Exception as e:
-            print(f"WeCom Broadcast Failed: {e}")
+            logger.error(f"WeCom Broadcast Failed: {e}")
 
     return jsonify({"reply": reply})
 
@@ -49,14 +74,13 @@ def send_sandbox_message():
     data = request.json
     user_msg = data.get('message', '').strip()
     nickname = data.get('nickname', '匿名同事')
-    
+
     if not user_msg:
         return jsonify({"error": "Message is empty"}), 400
 
     trace_id = "TRC-" + str(uuid.uuid4())[:8].upper()
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
 
-    # Add user message
     sandbox_messages.append({
         "id": str(uuid.uuid4()),
         "trace_id": trace_id,
@@ -66,7 +90,6 @@ def send_sandbox_message():
         "timestamp": timestamp
     })
 
-    # AI Logic based on chat_sandbox_v2.py
     query = user_msg.lower()
     if "行情" in query or "价格" in query:
         reply = "【情报引擎】当前正在分析 Iluka 鋯英砂行情，最新报价约为 2200 USD/吨，趋势稳定。"
@@ -75,7 +98,6 @@ def send_sandbox_message():
     else:
         reply = f"【正矿机器人】收到指令：'{user_msg}'。我已经将其存入记忆库，正在调取供应链历史记录。"
 
-    # Add AI Reply
     sandbox_messages.append({
         "id": str(uuid.uuid4()),
         "trace_id": trace_id,
@@ -85,12 +107,25 @@ def send_sandbox_message():
         "timestamp": datetime.datetime.now().strftime("%H:%M:%S")
     })
 
-    # Return success
+    save_messages(sandbox_messages)
+    logger.info(f"Sandbox message from {nickname}, trace={trace_id}")
+
     return jsonify({"status": "success", "trace_id": trace_id})
 
 @app.route('/health')
 def health():
-    return jsonify({"status": "online", "engine": "DeepSeek-V3"})
+    deps = {
+        "deepseek": bool(os.getenv("DEEPSEEK_API_KEY")),
+        "dashscope": bool(os.getenv("DASHSCOPE_API_KEY")),
+        "wecom_webhook": bool(os.getenv("WECOM_WEBHOOK_URL")),
+    }
+    all_ok = all(deps.values())
+    return jsonify({
+        "status": "online" if all_ok else "degraded",
+        "engine": "DeepSeek-V3",
+        "dependencies": deps,
+        "sandbox_messages": len(sandbox_messages)
+    })
 
 @app.route('/')
 def index():
@@ -127,16 +162,11 @@ def index():
                 const box = document.getElementById('chat-box');
                 const text = input.value.trim();
                 if(!text) return;
-                
-                // Add user message
                 box.innerHTML += `<div class="p-3 bg-blue-50 rounded-xl text-blue-800 text-sm ml-auto max-w-[80%] border border-blue-100">${text}</div>`;
                 input.value = '';
-                
-                // Show loading
                 const loadingId = 'loading-' + Date.now();
                 box.innerHTML += `<div id="${loadingId}" class="p-3 bg-white rounded-xl shadow-sm border border-slate-100 text-slate-500 text-xs inline-block animate-pulse">正在推演...</div>`;
                 box.scrollTop = box.scrollHeight;
-                
                 try {
                     const res = await fetch('/ai-manager/api/chat', {
                         method: 'POST',
