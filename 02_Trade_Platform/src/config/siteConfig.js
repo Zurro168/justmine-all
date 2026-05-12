@@ -40,7 +40,8 @@ export const siteConfig = {
   },
 
   // --- 备案信息 ---
-  icp: "粤ICP备XXXXXXXX号",
+  icp: "粤ICP备2025357941号-2",
+  psb: "粤公网安备44080302000318号",
 
   // --- 快捷功能开关 ---
   features: {

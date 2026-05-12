@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const VAULT_PATH = 'F:\\Documents\\Obsidian Vault\\正矿网站知识库';
+const VAULT_PATH = 'D:\\iCloudDrive\\iCloud~md~obsidian\\Obsidian Vault\\正矿网站知识库';
 const OUTPUT_FILE = path.join(__dirname, '..', 'src', 'data', 'kb-articles.json');
 
 // Map vault subfolder names → category IDs used in the website
