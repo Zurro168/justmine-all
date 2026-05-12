@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { SectionTitle, Card } from '../components/ui';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, 
-  ResponsiveContainer, ReferenceLine, Label
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ReferenceLine
 } from 'recharts';
-import { 
-  TrendingUp, TrendingDown, ArrowRight, Activity, 
-  Globe, AlertCircle, Zap, BookOpen, ChevronRight, 
+import {
+  TrendingUp, TrendingDown, ArrowRight, Activity,
+  Globe, Zap, BookOpen, ChevronRight,
   ExternalLink, MousePointer2
 } from 'lucide-react';
 import obsidianData from '../data/kb-articles.json';
@@ -16,48 +16,48 @@ import { useStore } from '../store/useStore';
 const PRICE_DATA = mineralPrices;
 
 const PRODUCTS = [
-  { 
-    id: 'zircon', 
-    label: '锆英砂 (Zircon)', 
-    color: '#3b82f6', 
-    unit: 'CNY/MT', 
-    spec: 'ZrO₂+HfO₂ ≥ 65%', 
+  {
+    id: 'zircon',
+    label: '锆英砂 (Zircon)',
+    color: '#3b82f6',
+    unit: 'CNY/MT',
+    spec: 'ZrO₂+HfO₂ ≥ 65%',
     desc: '澳洲/莫桑比克产优质锆砂，供陶瓷及耐材行业',
     indicators: [
       { label: '库存周转', val: '12', unit: 'Days', trend: 'down' },
       { label: '月均涨幅', val: '+2.4', unit: '%', trend: 'up' },
     ]
   },
-  { 
-    id: 'titanium', 
-    label: '钛精矿 (Ilmenite)', 
-    color: '#8b5cf6', 
-    unit: 'CNY/MT', 
-    spec: 'TiO₂ ≥ 50%', 
+  {
+    id: 'titanium',
+    label: '钛精矿 (Ilmenite)',
+    color: '#8b5cf6',
+    unit: 'CNY/MT',
+    spec: 'TiO₂ ≥ 50%',
     desc: '全球主流产区钛颗粒，供海绵钛及钛白粉行业',
     indicators: [
       { label: '港口库存', val: '1.2', unit: 'M MT', trend: 'up' },
       { label: '开工率', val: '92', unit: '%', trend: 'up' },
     ]
   },
-  { 
-    id: 'rutile', 
-    label: '金红石 (Rutile)', 
-    color: '#f59e0b', 
-    unit: 'CNY/MT', 
-    spec: 'TiO₂ ≥ 92%-95%', 
+  {
+    id: 'rutile',
+    label: '金红石 (Rutile)',
+    color: '#f59e0b',
+    unit: 'CNY/MT',
+    spec: 'TiO₂ ≥ 92%-95%',
     desc: '高品位天然金红石，供高端焊接材料及钛包粉',
     indicators: [
       { label: '现货紧缺度', val: 'High', unit: '', trend: 'up' },
       { label: '下游需求', val: 'Strong', unit: '', trend: 'up' },
     ]
   },
-  { 
-    id: 'monazite', 
-    label: '独居石 (Monazite)', 
-    color: '#10b981', 
-    unit: 'CNY/MT', 
-    spec: 'REO ≥ 55%', 
+  {
+    id: 'monazite',
+    label: '独居石 (Monazite)',
+    color: '#10b981',
+    unit: 'CNY/MT',
+    spec: 'REO ≥ 55%',
     desc: '澳洲及非洲产稀土共生矿，重要的稀土提取原料',
     indicators: [
       { label: '稀土含量', val: '58', unit: '%', trend: 'stable' },
@@ -93,16 +93,28 @@ const MarketPage = ({ mode = 'prices' }) => {
   const { setActiveTab, setSelectedKBArticle } = useStore();
   const [activeProduct, setActiveProduct] = useState('zircon');
   const [selectedPoint, setSelectedPoint] = useState(null);
+  const [timeRange, setTimeRange] = useState('Quarter');
 
   const product = PRODUCTS.find(p => p.id === activeProduct);
 
   const isSupplyMode = mode === 'supply';
 
-  // Filter Obsidian articles related to supply/market
+  const filteredPriceData = useMemo(() => {
+    const data = PRICE_DATA.filter(d => d[activeProduct] !== undefined);
+    if (!data.length) return [];
+    switch (timeRange) {
+      case 'Week': return data.slice(-2);
+      case 'Month': return data.slice(-6);
+      case 'Quarter': return data.slice(-12);
+      case 'Year': return data;
+      default: return data;
+    }
+  }, [timeRange, activeProduct]);
+
   const relatedArticles = useMemo(() => {
-    return obsidianData.filter(a => 
-      a.category === 'mineral' || 
-      a.title.includes('供应') || 
+    return obsidianData.filter(a =>
+      a.category === 'mineral' ||
+      a.title.includes('供应') ||
       a.title.includes('动态') ||
       a.title.includes('锆') ||
       a.title.includes('钛')
@@ -111,18 +123,17 @@ const MarketPage = ({ mode = 'prices' }) => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
-      <SectionTitle 
-        title={isSupplyMode ? "供应源实时动态" : "行业行情中心"} 
-        subtitle={isSupplyMode ? "全球矿区产能追踪 · 关键节点风险预警 · 供应链确定性分析" : "海量多维数据追踪 · 产区动态实时联动 · 价格趋势辅助决策"} 
+      <SectionTitle
+        title={isSupplyMode ? "供应源实时动态" : "行业行情中心"}
+        subtitle={isSupplyMode ? "全球矿区产能追踪 · 关键节点风险预警 · 供应链确定性分析" : "海量多维数据追踪 · 产区动态实时联动 · 价格趋势辅助决策"}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left: Product Selector & Summary */}
         <div className="lg:col-span-3 space-y-4">
           {PRODUCTS.map(p => {
             const isActive = activeProduct === p.id;
             return (
-              <div 
+              <div
                 key={p.id}
                 onClick={() => setActiveProduct(p.id)}
                 className={`p-6 rounded-3xl border-2 cursor-pointer transition-all ${
@@ -140,7 +151,7 @@ const MarketPage = ({ mode = 'prices' }) => {
                 </div>
                 <h4 className="font-black text-slate-900 text-lg mb-1">{p.label}</h4>
                 <p className="text-[11px] text-slate-500 leading-relaxed mb-4">{p.desc}</p>
-                
+
                 <div className="grid grid-cols-2 gap-2">
                    {p.indicators.map(ind => (
                      <div key={ind.label} className="bg-slate-100/50 rounded-xl p-2.5">
@@ -163,7 +174,7 @@ const MarketPage = ({ mode = 'prices' }) => {
                 </div>
                 <div className="mt-6 pt-6 border-t border-white/10 flex items-center justify-between group cursor-pointer" onClick={() => {
                    setActiveTab('knowledge');
-                   setSelectedKBArticle(null); // Just go to KB home
+                   setSelectedKBArticle(null);
                 }}>
                    <span className="text-[10px] font-black uppercase text-slate-400">调阅深度分析报告</span>
                    <ChevronRight size={14} className="text-slate-600 group-hover:text-blue-400 group-hover:translate-x-1 transition-all" />
@@ -172,7 +183,6 @@ const MarketPage = ({ mode = 'prices' }) => {
           </Card>
         </div>
 
-        {/* Middle: Professional Chart */}
         <div className="lg:col-span-9 space-y-8">
           <Card className="shadow-2xl shadow-slate-200/50 border-none p-8 overflow-visible">
              <div className="flex justify-between items-center mb-10">
@@ -185,15 +195,22 @@ const MarketPage = ({ mode = 'prices' }) => {
                 </div>
                 <div className="flex gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
                    {['Week', 'Month', 'Quarter', 'Year'].map(t => (
-                     <button key={t} className={`px-4 py-1.5 rounded-xl text-[11px] font-black transition-all ${t === 'Quarter' ? 'bg-white text-blue-600 shadow-sm ring-1 ring-slate-100' : 'text-slate-400 hover:text-slate-600'}`}>{t}</button>
+                     <button
+                       key={t}
+                       onClick={() => setTimeRange(t)}
+                       className={`px-4 py-1.5 rounded-xl text-[11px] font-black transition-all ${
+                         t === timeRange
+                           ? 'bg-white text-blue-600 shadow-sm ring-1 ring-slate-100'
+                           : 'text-slate-400 hover:text-slate-600'
+                       }`}>{t}</button>
                    ))}
                 </div>
              </div>
 
              <div className="h-[400px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart 
-                    data={PRICE_DATA}
+                  <AreaChart
+                    data={filteredPriceData}
                     margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
                     onMouseMove={(state) => {
                       if (state.activePayload) {
@@ -208,38 +225,37 @@ const MarketPage = ({ mode = 'prices' }) => {
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis 
-                      dataKey="month" 
-                      axisLine={false} 
-                      tickLine={false} 
+                    <XAxis
+                      dataKey="month"
+                      axisLine={false}
+                      tickLine={false}
                       tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 700 }}
                       dy={10}
                     />
-                    <YAxis 
-                      axisLine={false} 
-                      tickLine={false} 
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
                       tick={{ fill: '#94a3b8', fontSize: 11, fontWeight: 700 }}
                       domain={['auto', 'auto']}
                       dx={-10}
                     />
                     <Tooltip content={<CustomTooltip />} />
-                    
-                    {/* Event lines */}
-                    {PRICE_DATA.filter(d => d.event).map(d => (
-                      <ReferenceLine 
-                        key={d.month} 
-                        x={d.month} 
-                        stroke="#e2e8f0" 
+
+                    {filteredPriceData.filter(d => d.event).map(d => (
+                      <ReferenceLine
+                        key={d.month}
+                        x={d.month}
+                        stroke="#e2e8f0"
                         strokeDasharray="3 3"
                       />
                     ))}
 
-                    <Area 
-                      type="monotone" 
-                      dataKey={activeProduct} 
-                      stroke={product.color} 
-                      strokeWidth={4} 
-                      fillOpacity={1} 
+                    <Area
+                      type="monotone"
+                      dataKey={activeProduct}
+                      stroke={product.color}
+                      strokeWidth={4}
+                      fillOpacity={1}
                       fill="url(#colorPrice)"
                       dot={{ r: 4, strokeWidth: 2, fill: 'white' }}
                       activeDot={{ r: 7, strokeWidth: 3, fill: 'white', stroke: product.color }}
@@ -254,7 +270,7 @@ const MarketPage = ({ mode = 'prices' }) => {
                    <div className="flex flex-col">
                       <span className="text-[10px] font-black text-slate-400 uppercase mb-1">当前行情预估</span>
                       <span className="text-2xl font-black text-slate-900">
-                        {PRICE_DATA[PRICE_DATA.length - 1][activeProduct].toLocaleString()}
+                        {filteredPriceData.length > 0 ? filteredPriceData[filteredPriceData.length - 1][activeProduct]?.toLocaleString() : 'N/A'}
                         <span className="text-xs font-medium text-slate-400 ml-1">CNY/MT</span>
                       </span>
                    </div>
@@ -276,7 +292,6 @@ const MarketPage = ({ mode = 'prices' }) => {
              </div>
           </Card>
 
-          {/*联动 Obsidian 知识库*/}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
              <Card className="border-none shadow-xl shadow-slate-200/40 p-8">
                 <div className="flex items-center justify-between mb-6">
@@ -284,7 +299,7 @@ const MarketPage = ({ mode = 'prices' }) => {
                       <BookOpen className="text-blue-600" size={20} />
                       深度研判与产区周报
                    </h4>
-                   <button 
+                   <button
                     onClick={() => setActiveTab('knowledge')}
                     className="text-[10px] font-black text-blue-600 uppercase tracking-widest hover:underline"
                    >
@@ -294,7 +309,7 @@ const MarketPage = ({ mode = 'prices' }) => {
                 <div className="space-y-4">
                    {relatedArticles.length > 0 ? (
                      relatedArticles.map((art, idx) => (
-                       <div 
+                       <div
                          key={idx}
                          onClick={() => {
                            setActiveTab('knowledge');

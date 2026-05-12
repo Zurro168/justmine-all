@@ -16,6 +16,9 @@ const RiskControlPage = lazy(() => import('./pages/RiskControl'));
 const OrgChartPage   = lazy(() => import('./pages/OrgChart'));
 const AIConsole      = lazy(() => import('./pages/AIConsole'));
 const SandboxPage    = lazy(() => import('./pages/Sandbox'));
+const HistoryPage    = lazy(() => import('./pages/History'));
+const PartyBuildingPage = lazy(() => import('./pages/PartyBuilding'));
+const CareersPage    = lazy(() => import('./pages/Careers'));
 
 // Error Boundary to catch and display any runtime crashes visibly
 class ErrorBoundary extends React.Component {
@@ -77,10 +80,10 @@ const App = () => {
             {activeTab === 'finance'     && <FinancePage />}
             {activeTab === 'documents'   && <DocumentsPage />}
             {activeTab === 'riskcontrol' && <RiskControlPage />}
-            {activeTab === 'history'     && <CorporatePage />}
-            {activeTab === 'party'       && <CorporatePage />}
+            {activeTab === 'history'     && <HistoryPage />}
+            {activeTab === 'party'       && <PartyBuildingPage />}
             {activeTab === 'orgchart'    && <OrgChartPage />}
-            {activeTab === 'careers'     && <CorporatePage />}
+            {activeTab === 'careers'     && <CareersPage />}
             {activeTab === 'supplywatch' && <MarketPage mode="supply" />}
             {activeTab === 'settlement'  && <DashboardPage />}
             {activeTab === 'aiconsole'   && <AIConsole />}

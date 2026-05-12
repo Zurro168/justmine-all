@@ -6,7 +6,7 @@ const SmartSettlementModal = ({ order, rules = ordersData.rules.zircon, onClose 
   if (!order) return null;
 
   // Mock CIQ input values based on order
-  const basePrice = 17200; // 基准价格
+  const basePrice = order.basePrice || 17200; // 基准价格 (dynamic from order data)
   const wetWeight = parseInt(order.volume); // 湿吨
   
   const [ciqData, setCiqData] = useState({
