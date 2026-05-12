@@ -1,6 +1,6 @@
 import React from 'react';
 import { SectionTitle, Card } from '../components/ui';
-import { Timeline, Award, TrendingUp, Globe } from 'lucide-react';
+import { Award, TrendingUp, Globe } from 'lucide-react';
 
 const HistoryPage = () => {
   const milestones = [

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Card, SectionTitle } from '../components/ui';
 import { FileStack, Clock, PieChart, AlertCircle, ChevronRight, CheckCircle2, LogIn, Lock, Ship, Globe, Package, TrendingUp, MapPin } from 'lucide-react';
-import { MOCK_ORDERS, MOCK_ALERTS } from '../services/mockData';
 import SmartSettlementModal from '../components/business/settlement/SmartSettlementModal';
 import { useStore } from '../store/useStore';
 import roster from '../data/employee-roster.json';
