@@ -1,23 +1,23 @@
 /**
- * Mock Authentication Service
- * Simulates API calls to a backend database.
+ * Authentication Service — SHA-256 hash-based password verification.
  */
+import { verifyPassword } from '../utils/hashPassword';
 import users from '../data/users.json';
 import roster from '../data/employee-roster.json';
 
 const authService = {
-  /**
-   * Mock login with 800ms delay
-   */
   async login(username, password) {
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        const user = users.find(u => u.username === username && u.password === password);
-        
-        if (user) {
-          // Remove password before returning
-          const { password: _, ...userWithoutPassword } = user;
-          resolve(userWithoutPassword);
+    return new Promise(async (resolve, reject) => {
+      setTimeout(async () => {
+        const user = users.find(u => u.username === username);
+        if (user && user.passwordHash) {
+          const isValid = await verifyPassword(password, user.passwordHash);
+          if (isValid) {
+            const { passwordHash: _, ...userWithoutPassword } = user;
+            resolve(userWithoutPassword);
+          } else {
+            reject(new Error('用户名或密码错误，请重试'));
+          }
         } else {
           reject(new Error('用户名或密码错误，请重试'));
         }
@@ -25,18 +25,14 @@ const authService = {
     });
   },
 
-  /**
-   * Mock registration by checking employee roster
-   */
   async registerByRoster(nameOrEnglishName, newPassword) {
     return new Promise((resolve, reject) => {
       setTimeout(() => {
-        const match = roster.find(e => 
+        const match = roster.find(e =>
           (e.name === nameOrEnglishName || e.englishName.toLowerCase() === nameOrEnglishName.toLowerCase())
         );
 
         if (match) {
-          // In a real app, we would update the DB. Here we mock success.
           const newUser = {
             username: nameOrEnglishName.replace(/\s+/g, '_').toLowerCase(),
             name: match.name,
@@ -53,9 +49,6 @@ const authService = {
     });
   },
 
-  /**
-   * Get user category display name
-   */
   getCategoryName(category) {
     const map = {
       'EMPLOYEE': '内部员工',

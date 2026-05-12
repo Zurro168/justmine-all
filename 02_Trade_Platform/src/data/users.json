@@ -1,7 +1,7 @@
 [
   {
     "username": "admin",
-    "password": "zk2024",
+    "passwordHash": "9005ddcc02139a95b181a00695f618e560bfa41bc46d7d7ac3fec3fc6e0570ef",
     "name": "系统管理员",
     "role": "ADMIN",
     "category": "EMPLOYEE",
@@ -10,7 +10,7 @@
   },
   {
     "username": "js",
-    "password": "zk2024",
+    "passwordHash": "9005ddcc02139a95b181a00695f618e560bfa41bc46d7d7ac3fec3fc6e0570ef",
     "name": "王国东",
     "role": "VICE_GM",
     "category": "EMPLOYEE",
@@ -19,7 +19,7 @@
   },
   {
     "username": "ops",
-    "password": "zk2024",
+    "passwordHash": "9005ddcc02139a95b181a00695f618e560bfa41bc46d7d7ac3fec3fc6e0570ef",
     "name": "张运营",
     "role": "OPERATIONS",
     "category": "EMPLOYEE",
@@ -28,7 +28,7 @@
   },
   {
     "username": "iluka_sales",
-    "password": "zk2024",
+    "passwordHash": "9005ddcc02139a95b181a00695f618e560bfa41bc46d7d7ac3fec3fc6e0570ef",
     "name": "Mark Wilson",
     "role": "SALES_DIRECTOR",
     "category": "UPSTREAM",
@@ -37,7 +37,7 @@
   },
   {
     "username": "ceramics_buyer",
-    "password": "zk2024",
+    "passwordHash": "9005ddcc02139a95b181a00695f618e560bfa41bc46d7d7ac3fec3fc6e0570ef",
     "name": "李经理",
     "role": "PURCHASING_MGR",
     "category": "DOWNSTREAM",
@@ -46,7 +46,7 @@
   },
   {
     "username": "logistics_agent",
-    "password": "zk2024",
+    "passwordHash": "9005ddcc02139a95b181a00695f618e560bfa41bc46d7d7ac3fec3fc6e0570ef",
     "name": "王关务",
     "role": "CUSTOMS_BROKER",
     "category": "SERVICE",
