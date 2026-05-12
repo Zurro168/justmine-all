@@ -128,17 +128,38 @@ const Footer = () => {
       </div>
 
       <div className="max-w-7xl mx-auto mt-12 pt-6 border-t border-slate-800 flex flex-col sm:flex-row justify-between items-center text-[10px] sm:text-xs gap-3">
-        <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
-          <p>© 2024 {siteConfig.brand.fullName} 版权所有。</p>
-          <div className="flex items-center gap-3">
-            <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer" className="hover:text-white transition">
-              {siteConfig.icp}
-            </a>
-            <a href={`http://www.beian.gov.cn/portal/registerSystemInfo?recordcode=${siteConfig.psb.replace(/[^\d]/g, '')}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-white transition">
-              <img src="https://img.alicdn.com/tfs/TB1.._9uO_1gK0jSZFqXXab8VXa-20-20.png" alt="psb" className="w-3 h-3" />
-              {siteConfig.psb}
-            </a>
-          </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
+          <span>© {new Date().getFullYear()} {siteConfig.brand.fullName} 版权所有。</span>
+          
+          {/* ICP Filing with Icon */}
+          <a 
+            href="https://beian.miit.gov.cn/" 
+            target="_blank" 
+            rel="noreferrer" 
+            className="flex items-center gap-1 hover:text-slate-300 transition-colors"
+          >
+            <img 
+              src="https://img.alicdn.com/tfs/TB1Sa76uO_1gK0jSZFqXXab8VXa-24-24.png" 
+              alt="ICP" 
+              className="w-3.5 h-3.5 opacity-70"
+            />
+            {siteConfig.icp}
+          </a>
+
+          {/* PSB Filing with Icon and exact link */}
+          <a 
+            href="https://beian.mps.gov.cn/#/query/websearch?code=44080302000318" 
+            target="_blank" 
+            rel="noreferrer" 
+            className="flex items-center gap-1 hover:text-slate-300 transition-colors"
+          >
+            <img 
+              src="https://img.alicdn.com/tfs/TB1.._9uO_1gK0jSZFqXXab8VXa-20-20.png" 
+              alt="PSB" 
+              className="w-3.5 h-3.5 opacity-70"
+            />
+            {siteConfig.psb}
+          </a>
         </div>
         <div className="flex gap-5">
           <span className="hover:text-white cursor-pointer transition">隐私政策</span>
