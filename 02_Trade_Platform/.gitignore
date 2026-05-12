@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Sensitive data (tracked only locally, not pushed)
+src/data/users.json
+src/data/employee-roster.json
+.env
+.env.local
