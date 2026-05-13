@@ -1,33 +1,14 @@
 services:
-  # --- 01. 智控沙盘后台 ---
+  # --- 01. 智控沙盘后台 (包含 dashboard + wecom bot) ---
   zk-dashboard:
     build:
       context: ../01_Intelligence_Engine/
       dockerfile: openclaw-deployment/Dockerfile
     container_name: zk-dashboard
-    command: python openclaw-deployment/app_dashboard.py
     restart: unless-stopped
     env_file: .env.justmine
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    networks:
-      - justmine-net
-
-  # --- 01. 企微机器人后台 ---
-  zk-ai-bot:
-    build:
-      context: ../01_Intelligence_Engine/
-      dockerfile: openclaw-deployment/Dockerfile
-    container_name: zk-ai-bot
-    command: python openclaw-deployment/wecom_bot.py
-    restart: unless-stopped
-    env_file: .env.justmine
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/wecom/')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -69,7 +50,6 @@ services:
       # - ./ssl:/etc/nginx/ssl:ro
     depends_on:
       - zk-dashboard
-      - zk-ai-bot
       - zk-website
     networks:
       - justmine-net
