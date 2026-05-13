@@ -14,5 +14,7 @@ COPY . .
 EXPOSE 3000
 EXPOSE 5000
 
-# 4. 启动智控仪表盘 & 沙盘逻辑
-CMD ["python", "app_dashboard.py"]
+# 4. 启动智控仪表盘 & 沙盘逻辑 + WeCom Bot
+COPY openclaw-deployment/start.sh start.sh
+RUN chmod +x start.sh
+CMD ["./start.sh"]
