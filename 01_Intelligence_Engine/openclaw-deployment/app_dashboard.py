@@ -36,6 +36,8 @@ def save_messages(messages):
     try:
         with open(MESSAGES_FILE, 'w') as f:
             json.dump(messages[-500:], f)
+    except IOError as e:
+        logger.error(f"Failed to save sandbox messages: {e}")
 
 sandbox_messages = load_messages()
 

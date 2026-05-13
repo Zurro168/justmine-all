@@ -65,10 +65,10 @@ class TrustMaster:
                 }
                 
                 # 简单的真值判断逻辑
-                if "At sea" in status and "In port" in status:
+                if "At sea" in status or "In port" in status:
                     verification_report["trust_score"] = 90
-                else: 
-                    verification_report["trust_score"] = 60 # 状态异常告警
+                else:
+                    verification_report["trust_score"] = 60
 
                 return verification_report
 

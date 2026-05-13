@@ -1,26 +1,18 @@
-# -*- coding: utf-8 -*-
-# --- [SOP-V2.5: 正矿企微机器人·智能体中枢版] ---
 import os
-import time
-import logging
 import hashlib
 import base64
 import struct
+import logging
+import time
+import requests
 import xml.etree.ElementTree as ET
 from flask import Flask, request, make_response
-from openai import OpenAI
 from Crypto.Cipher import AES
 
-# ─── LOGGING CONFIG ──────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format='{"time":"%(asctime)s","level":"%(levelname)s","message":"%(message)s"}'
-)
-logger = logging.getLogger(__name__)
+# 初始化日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("wecom_bot")
 
-app = Flask(__name__)
-
-# ─── WECOM CRYPTO UTILS ──────────────────────────────────────────────────────
 class WXBizMsgCrypt:
     def __init__(self, token, encoding_aes_key, corp_id):
         self.token = token
@@ -32,143 +24,147 @@ class WXBizMsgCrypt:
         return hashlib.sha1(''.join(v).encode('utf-8')).hexdigest()
 
     def decrypt(self, encrypt_msg, msg_signature, timestamp, nonce):
-        # 1. Verify Signature
         if msg_signature != self._get_signature(timestamp, nonce, encrypt_msg):
             return None, "Signature Verification Failed"
-        
-        # 2. AES Decrypt
         try:
             cipher = AES.new(self.key, AES.MODE_CBC, self.key[:16])
             plain_text = cipher.decrypt(base64.b64decode(encrypt_msg))
-            # Remove PKCS7 padding
             pad = plain_text[-1]
-            content = plain_text[16:-pad]
-            # Unpack: random(16) + length(4) + msg + corp_id
-            xml_len = struct.unpack(">I", content[:4])[0]
-            xml_content = content[4:4+xml_len].decode('utf-8')
-            from_corp_id = content[4+xml_len:].decode('utf-8')
-            if from_corp_id != self.corp_id:
-                return None, "CorpID Mismatch"
+            if pad < 1 or pad > 32: pad = 0
+            content = plain_text[:-pad] if pad > 0 else plain_text
+            if len(content) < 20:
+                return None, f"Decrypted content too short: {len(content)} bytes"
+            xml_len = struct.unpack(">I", content[16:20])[0]
+            xml_content = content[20:20+xml_len].decode('utf-8')
             return xml_content, None
         except Exception as e:
+            logger.error(f"Decryption error: {str(e)}")
             return None, str(e)
 
     def encrypt(self, reply_msg, nonce):
-        # Build raw data: random(16) + len(4) + msg + corp_id
+        # 1. Pack: random(16) + length(4) + msg + corp_id
         random_str = os.urandom(16)
         msg_bytes = reply_msg.encode('utf-8')
         msg_len = struct.pack(">I", len(msg_bytes))
-        raw_data = random_str + msg_len + msg_bytes + self.corp_id.encode('utf-8')
+        corp_id_bytes = self.corp_id.encode('utf-8')
         
-        # PKCS7 Padding
-        block_size = 32
-        pad_len = block_size - (len(raw_data) % block_size)
+        raw_data = random_str + msg_len + msg_bytes + corp_id_bytes
+        
+        # 2. PKCS7 Padding
+        pad_len = 32 - (len(raw_data) % 32)
         raw_data += bytes([pad_len] * pad_len)
         
+        # 3. AES Encrypt
         cipher = AES.new(self.key, AES.MODE_CBC, self.key[:16])
         encrypt_msg = base64.b64encode(cipher.encrypt(raw_data)).decode('utf-8')
         
+        # 4. Generate Signature
         timestamp = str(int(time.time()))
         signature = self._get_signature(timestamp, nonce, encrypt_msg)
         
-        return f"""<xml>
-<Encrypt><![CDATA[{encrypt_msg}]]></Encrypt>
-<MsgSignature><![CDATA[{signature}]]></MsgSignature>
-<TimeStamp>{timestamp}</TimeStamp>
-<Nonce><![CDATA[{nonce}]]></Nonce>
-</xml>"""
+        # 5. Wrap in XML
+        xml_tpl = """<xml>
+            <Encrypt><![CDATA[{msg}]]></Encrypt>
+            <MsgSignature><![CDATA[{sig}]]></MsgSignature>
+            <TimeStamp>{ts}</TimeStamp>
+            <Nonce><![CDATA[{nonce}]]></Nonce>
+        </xml>"""
+        return xml_tpl.format(msg=encrypt_msg, sig=signature, ts=timestamp, nonce=nonce)
 
-# ─── AGENT DISPATCHER ────────────────────────────────────────────────────────
-def agent_dispatcher(query, user_id):
-    """Route queries to different agents based on keywords."""
-    query = query.strip()
+def ask_deepseek(question):
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key or api_key == "YOUR_DEEPSEEK_KEY":
+        return "AI 秘钥未配置，请联系管理员。"
     
-    if query.startswith("!行情") or "行情" in query:
-        return "🚀 [Market-Scout] 正在为您抓取最新锆钛大宗行情，请稍候...\n(演示功能：目前仅支持 DeepSeek 模拟回复)"
+    url = "https://api.deepseek.com/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "你是一个名为“正矿智控”的专业助理，致力于为矿业供应链和风险管理提供智能化支持。"},
+            {"role": "user", "content": question}
+        ],
+        "stream": False
+    }
     
-    if query.startswith("!状态") or "运行情况" in query:
-        return "🛡️ [Nexus] 系统状态检查：\n- Website: 运行中\n- Intelligence Engine: 运行中\n- Scout-Scheduler: 已就绪"
-
-    # Default to DeepSeek Brain
     try:
-        client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")
-        response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=[
-                {"role": "system", "content": "你是由正矿供应链部署的AI助手。"},
-                {"role": "user", "content": query}
-            ]
-        )
-        return response.choices[0].message.content
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        res_json = response.json()
+        return res_json['choices'][0]['message']['content']
     except Exception as e:
-        return f"💡 暂时无法连接到智能体大脑: {str(e)}"
+        logger.error(f"DeepSeek API Error: {str(e)}")
+        return f"AI 思考时遇到了点麻烦: {str(e)}"
 
-# ─── FLASK ROUTES ────────────────────────────────────────────────────────────
-@app.route('/wecom/callback', methods=['GET', 'POST'])
-@app.route('/wecom/', methods=['GET', 'POST'])
+app = Flask(__name__)
+
 @app.route('/wecom', methods=['GET', 'POST'])
 def wecom_gateway():
-    # Load config from env
     token = os.getenv("WECHAT_TOKEN")
     aes_key = os.getenv("WECHAT_ENCODING_AES_KEY")
     corp_id = os.getenv("WECHAT_CORP_ID")
-    
+
+    if not all([token, aes_key, corp_id]):
+        logger.error("Missing WeCom credentials in environment variables")
+        return make_response("Server misconfigured", 500)
+
     crypto = WXBizMsgCrypt(token, aes_key, corp_id)
     
     msg_signature = request.args.get('msg_signature', '')
     timestamp = request.args.get('timestamp', '')
     nonce = request.args.get('nonce', '')
 
-    # 1. URL Verification (GET)
+    # 1. 处理企微验证请求 (GET)
     if request.method == 'GET':
         echo_str = request.args.get('echostr', '')
         if not echo_str: return "OK"
         content, err = crypto.decrypt(echo_str, msg_signature, timestamp, nonce)
-        if err:
-            logger.error(f"Verification failed: {err}")
-            return err, 403
-        return content
+        return make_response(content, 200) if not err else make_response(err, 403)
 
-    # 2. Message Handling (POST)
+    # 2. 处理用户消息 (POST)
     try:
-        # Parse Encrypted XML
-        root = ET.fromstring(request.data)
-        encrypt_msg = root.find('Encrypt').text
+        # 解密消息
+        xml_data = request.data
+        root = ET.fromstring(xml_data)
+        encrypt_msg = root.find("Encrypt").text
         
         xml_content, err = crypto.decrypt(encrypt_msg, msg_signature, timestamp, nonce)
-        if err:
-            logger.error(f"Decrypt failed: {err}")
-            return "Error", 200
+        if err: return make_response("decrypt failed", 403)
         
-        # Parse Decrypted Content
-        xml_data = ET.fromstring(xml_content)
-        from_user = xml_data.find('FromUserName').text
-        to_user = xml_data.find('ToUserName').text
-        content_node = xml_data.find('Content')
+        # 解析 XML 内容
+        msg_root = ET.fromstring(xml_content)
+        msg_type = msg_root.find("MsgType").text
+        user_id = msg_root.find("FromUserName").text
         
-        if content_node is None:
-            return make_response("")
-
-        user_query = content_node.text
-        logger.info(f"Message from {from_user}: {user_query}")
-
-        # Dispatch to Agents
-        reply_text = agent_dispatcher(user_query, from_user)
-
-        # Encrypt Reply
-        reply_xml = f"""<xml>
-<ToUserName><![CDATA[{from_user}]]></ToUserName>
-<FromUserName><![CDATA[{to_user}]]></FromUserName>
-<CreateTime>{int(time.time())}</CreateTime>
-<MsgType><![CDATA[text]]></MsgType>
-<Content><![CDATA[{reply_text}]]></Content>
-</xml>"""
-        
-        return crypto.encrypt(reply_xml, nonce)
-
+        if msg_type == "text":
+            content = msg_root.find("Content").text
+            logger.info(f"Received msg from {user_id}: {content}")
+            
+            # 调用 AI
+            ai_reply = ask_deepseek(content)
+            
+            # 构造回复 XML
+            reply_tpl = """<xml>
+                <ToUserName><![CDATA[{to}]]></ToUserName>
+                <FromUserName><![CDATA[{from_me}]]></FromUserName>
+                <CreateTime>{ts}</CreateTime>
+                <MsgType><![CDATA[text]]></MsgType>
+                <Content><![CDATA[{content}]]></Content>
+            </xml>"""
+            reply_xml = reply_tpl.format(
+                to=user_id,
+                from_me=corp_id,
+                ts=int(time.time()),
+                content=ai_reply
+            )
+            
+            # 加密并返回
+            return crypto.encrypt(reply_xml, nonce)
+            
     except Exception as e:
-        logger.error(f"Gateway logic error: {e}")
-        return make_response(""), 200
+        logger.error(f"Post error: {str(e)}")
+        return "success" # 企微要求即便报错也要返回 success 避免重试
 
-if __name__ == "__main__":
+    return "success"
+
+if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
