@@ -71,6 +71,25 @@ class WXBizMsgCrypt:
         </xml>"""
         return xml_tpl.format(msg=encrypt_msg, sig=signature, ts=timestamp, nonce=nonce)
 
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "bots"))
+from agent_factory_v2 import OpenClawAgentFactory
+
+factory = OpenClawAgentFactory(
+    config_path=os.path.join(os.path.dirname(__file__), "..", "bots", "openclaw_prompts_v2.json")
+)
+
+def process_message_via_agents(user_message: str, user_id: str) -> str:
+    """Route message through Jaguar and execute the target agent."""
+    routing = factory.dispatch_task(user_message)
+    target = routing.get("target_agent", "scout")
+    reply = factory.execute_agent(target, user_message, {
+        "user_id": user_id,
+        "source": "wecom",
+        "routing_params": routing.get("extracted_parameters", {})
+    })
+    return reply
+
 def ask_deepseek(question):
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key or api_key == "YOUR_DEEPSEEK_KEY":
@@ -140,7 +159,7 @@ def wecom_gateway():
             logger.info(f"Received msg from {user_id}: {content}")
             
             # 调用 AI
-            ai_reply = ask_deepseek(content)
+            ai_reply = process_message_via_agents(content, user_id)
             
             # 构造回复 XML
             reply_tpl = """<xml>

@@ -1,6 +1,11 @@
 import json
 import os
+import sys
 import requests
+
+# Ensure UTF-8 output on Windows consoles
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 class OpenClawAgentFactory:
     def __init__(self, config_path=None):
