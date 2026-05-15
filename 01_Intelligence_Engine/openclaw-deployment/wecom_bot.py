@@ -162,6 +162,7 @@ def wecom_gateway():
             encrypt_msg = root.find("Encrypt").text
 
         xml_content, err = crypto.decrypt(encrypt_msg, msg_signature, timestamp, nonce)
+        logger.info(f"[DEBUG] Decrypt result - err={err}, xml_content={repr(xml_content)}")
         if err:
             logger.error(f"Decrypt failed: {err}")
             return make_response("decrypt failed", 403)
