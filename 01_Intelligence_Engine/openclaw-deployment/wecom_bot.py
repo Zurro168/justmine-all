@@ -121,27 +121,65 @@ def ask_deepseek(question):
 
 app = Flask(__name__)
 
-# Message dedup: track in-flight AI processing to prevent WeCom retries from duplicating work
-_pending_messages: dict[str, dict] = {}  # msgid -> {"lock": threading.Event(), "reply": str}
-_pending_lock = threading.Lock()
+# === 企微主动推送（异步回复，不受 response_url 超时限制）===
+class WecomPushClient:
+    """Send messages to users via WeCom Application Message API."""
+    def __init__(self):
+        self.agent_id = os.getenv("WECOM_AGENT_ID", "")
+        self.app_secret = os.getenv("WECOM_APP_SECRET", "")
+        self.corp_id = os.getenv("WECHAT_CORP_ID", "")
+        self._access_token = None
+        self._token_expires_at = 0
+        self._enabled = True
+        if not all([self.agent_id, self.app_secret]):
+            logger.warning("WECOM_AGENT_ID or WECOM_APP_SECRET not set, async push disabled")
+            self._enabled = False
 
-def _get_or_create_pending(msgid: str) -> tuple[dict, bool]:
-    """Get existing pending message or create new one. Returns (info, is_duplicate)."""
-    with _pending_lock:
-        if msgid in _pending_messages:
-            return _pending_messages[msgid], True
-        info = {"done": threading.Event(), "reply": None}
-        _pending_messages[msgid] = info
-        return info, False
+    def _get_access_token(self) -> str:
+        if time.time() < self._token_expires_at and self._access_token:
+            return self._access_token
+        try:
+            url = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
+            resp = requests.get(url, params={
+                "corpid": self.corp_id,
+                "corpsecret": self.app_secret
+            }, timeout=10).json()
+            if "access_token" in resp:
+                self._access_token = resp["access_token"]
+                self._token_expires_at = time.time() + resp.get("expires_in", 7000) - 200
+                return self._access_token
+            logger.error(f"Failed to get access_token: {resp}")
+            return ""
+        except Exception as e:
+            logger.error(f"get_token error: {e}")
+            return ""
 
-def _cleanup_old_messages():
-    """Remove old pending entries to prevent memory leak. Keep only last 5 minutes."""
-    now = time.time()
-    cutoff = now - 300  # 5 minutes
-    with _pending_lock:
-        stale = [k for k, v in _pending_messages.items() if v["done"].is_set() and k in _pending_messages]
-        for k in stale[:100]:  # Clean up in batches to avoid blocking too long
-            del _pending_messages[k]
+    def send_text(self, user_id: str, text: str) -> bool:
+        if not self._enabled:
+            logger.warning("Push client not enabled, falling back to webhook")
+            return False
+        token = self._get_access_token()
+        if not token:
+            return False
+        try:
+            url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
+            payload = {
+                "touser": user_id,
+                "agentid": int(self.agent_id),
+                "msgtype": "text",
+                "text": {"content": text}
+            }
+            resp = requests.post(url, json=payload, timeout=10).json()
+            if resp.get("errcode", 1) != 0:
+                logger.error(f"Push failed: {resp}")
+                return False
+            logger.info(f"Push OK to {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Push error: {e}")
+            return False
+
+push_client = WecomPushClient()
 
 @app.route('/wecom', methods=['GET', 'POST'])
 def wecom_gateway():
@@ -200,49 +238,27 @@ def wecom_gateway():
 
         if is_ai_bot_mode:
             # --- AI Bot 新接口 ---
-            msg_id = msg_json.get("msgid", "")
             user_id = msg_json.get("from", {}).get("userid", "unknown")
             msg_type = msg_json.get("msgtype", "")
-            response_url = msg_json.get("response_url", "")
             content = msg_json.get("text", {}).get("content", "")
 
             if msg_type == "text":
-                # Check for duplicate (WeCom retry)
-                pending_info, is_duplicate = _get_or_create_pending(msg_id)
-                if is_duplicate:
-                    logger.info(f"[AI Bot] Duplicate msg {msg_id[:8]}... from {user_id}, waiting for original")
-                    # Wait for the original request to finish (max 60s)
-                    got_it = pending_info["done"].wait(timeout=60)
-                    if got_it:
-                        logger.info(f"[AI Bot] Duplicate picked up reply from original processing")
-                    return "success"
-
-                logger.info(f"[AI Bot] Received msg {msg_id[:8]}... from {user_id}: {content}")
-                try:
-                    t_start = time.time()
-                    ai_reply = process_message_via_agents(content, user_id)
-                    t_elapsed = time.time() - t_start
-                    logger.info(f"[AI Bot] AI reply generated in {t_elapsed:.1f}s: {ai_reply[:80]}...")
-                except Exception as e:
-                    logger.error(f"[AI Bot] Agent pipeline FAILED: {type(e).__name__}: {e}", exc_info=True)
-                    ai_reply = f"处理消息时出错: {str(e)[:100]}"
-                    logger.info(f"[AI Bot] Sending error fallback reply")
-
-                # 通过 response_url 发送回复
-                try:
-                    resp = requests.post(response_url, json={
-                        "msgtype": "text",
-                        "text": {"content": ai_reply}
-                    }, timeout=10)
-                    logger.info(f"[AI Bot] Reply sent: {resp.status_code}")
-                except Exception as e:
-                    logger.error(f"[AI Bot] Reply failed: {e}")
-
-                # Mark as done and store reply
-                pending_info["reply"] = ai_reply
-                pending_info["done"].set()
-                _cleanup_old_messages()
-
+                logger.info(f"[AI Bot] Received msg from {user_id}: {content}")
+                # Async: return success immediately, process in background
+                def _async_reply():
+                    try:
+                        t_start = time.time()
+                        ai_reply = process_message_via_agents(content, user_id)
+                        t_elapsed = time.time() - t_start
+                        logger.info(f"[AI Bot] Reply generated in {t_elapsed:.1f}s: {ai_reply[:80]}...")
+                        # Push via WeCom application API
+                        if push_client.send_text(user_id, ai_reply):
+                            logger.info(f"[AI Bot] Reply pushed to {user_id}")
+                        else:
+                            logger.error(f"[AI Bot] Push failed for {user_id}")
+                    except Exception as e:
+                        logger.error(f"[AI Bot] Async pipeline FAILED: {type(e).__name__}: {e}", exc_info=True)
+                threading.Thread(target=_async_reply, daemon=True).start()
                 return "success"
         else:
             # --- 旧 XML 接口 ---
