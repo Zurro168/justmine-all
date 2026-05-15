@@ -166,6 +166,8 @@ def wecom_gateway():
             logger.error(f"Decrypt failed: {err}")
             return make_response("decrypt failed", 403)
 
+        logger.info(f"[DEBUG] Decrypted content: {xml_content}")
+
         # 解析 XML 内容
         msg_root = ET.fromstring(xml_content)
         msg_type = msg_root.find("MsgType").text
