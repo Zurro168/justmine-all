@@ -46,8 +46,7 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      # HTTPS cert (uncomment after placing files)
-      # - ./ssl:/etc/nginx/ssl:ro
+      - ./ssl:/etc/nginx/ssl:ro
     depends_on:
       - zk-dashboard
       - zk-website
