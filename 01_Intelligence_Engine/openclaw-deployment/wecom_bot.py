@@ -5,6 +5,7 @@ import base64
 import struct
 import logging
 import time
+import threading
 import requests
 import xml.etree.ElementTree as ET
 from flask import Flask, request, make_response, jsonify
@@ -120,6 +121,28 @@ def ask_deepseek(question):
 
 app = Flask(__name__)
 
+# Message dedup: track in-flight AI processing to prevent WeCom retries from duplicating work
+_pending_messages: dict[str, dict] = {}  # msgid -> {"lock": threading.Event(), "reply": str}
+_pending_lock = threading.Lock()
+
+def _get_or_create_pending(msgid: str) -> tuple[dict, bool]:
+    """Get existing pending message or create new one. Returns (info, is_duplicate)."""
+    with _pending_lock:
+        if msgid in _pending_messages:
+            return _pending_messages[msgid], True
+        info = {"done": threading.Event(), "reply": None}
+        _pending_messages[msgid] = info
+        return info, False
+
+def _cleanup_old_messages():
+    """Remove old pending entries to prevent memory leak. Keep only last 5 minutes."""
+    now = time.time()
+    cutoff = now - 300  # 5 minutes
+    with _pending_lock:
+        stale = [k for k, v in _pending_messages.items() if v["done"].is_set() and k in _pending_messages]
+        for k in stale[:100]:  # Clean up in batches to avoid blocking too long
+            del _pending_messages[k]
+
 @app.route('/wecom', methods=['GET', 'POST'])
 def wecom_gateway():
     token = os.getenv("WECHAT_TOKEN")
@@ -177,13 +200,24 @@ def wecom_gateway():
 
         if is_ai_bot_mode:
             # --- AI Bot 新接口 ---
+            msg_id = msg_json.get("msgid", "")
             user_id = msg_json.get("from", {}).get("userid", "unknown")
             msg_type = msg_json.get("msgtype", "")
             response_url = msg_json.get("response_url", "")
             content = msg_json.get("text", {}).get("content", "")
 
             if msg_type == "text":
-                logger.info(f"[AI Bot] Received msg from {user_id}: {content}")
+                # Check for duplicate (WeCom retry)
+                pending_info, is_duplicate = _get_or_create_pending(msg_id)
+                if is_duplicate:
+                    logger.info(f"[AI Bot] Duplicate msg {msg_id[:8]}... from {user_id}, waiting for original")
+                    # Wait for the original request to finish (max 60s)
+                    got_it = pending_info["done"].wait(timeout=60)
+                    if got_it:
+                        logger.info(f"[AI Bot] Duplicate picked up reply from original processing")
+                    return "success"
+
+                logger.info(f"[AI Bot] Received msg {msg_id[:8]}... from {user_id}: {content}")
                 try:
                     t_start = time.time()
                     ai_reply = process_message_via_agents(content, user_id)
@@ -203,6 +237,11 @@ def wecom_gateway():
                     logger.info(f"[AI Bot] Reply sent: {resp.status_code}")
                 except Exception as e:
                     logger.error(f"[AI Bot] Reply failed: {e}")
+
+                # Mark as done and store reply
+                pending_info["reply"] = ai_reply
+                pending_info["done"].set()
+                _cleanup_old_messages()
 
                 return "success"
         else:
