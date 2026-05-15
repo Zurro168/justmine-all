@@ -121,65 +121,9 @@ def ask_deepseek(question):
 
 app = Flask(__name__)
 
-# === 企微主动推送（异步回复，不受 response_url 超时限制）===
-class WecomPushClient:
-    """Send messages to users via WeCom Application Message API."""
-    def __init__(self):
-        self.agent_id = os.getenv("WECOM_AGENT_ID", "")
-        self.app_secret = os.getenv("WECOM_APP_SECRET", "")
-        self.corp_id = os.getenv("WECHAT_CORP_ID", "")
-        self._access_token = None
-        self._token_expires_at = 0
-        self._enabled = True
-        if not all([self.agent_id, self.app_secret]):
-            logger.warning("WECOM_AGENT_ID or WECOM_APP_SECRET not set, async push disabled")
-            self._enabled = False
-
-    def _get_access_token(self) -> str:
-        if time.time() < self._token_expires_at and self._access_token:
-            return self._access_token
-        try:
-            url = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
-            resp = requests.get(url, params={
-                "corpid": self.corp_id,
-                "corpsecret": self.app_secret
-            }, timeout=10).json()
-            if "access_token" in resp:
-                self._access_token = resp["access_token"]
-                self._token_expires_at = time.time() + resp.get("expires_in", 7000) - 200
-                return self._access_token
-            logger.error(f"Failed to get access_token: {resp}")
-            return ""
-        except Exception as e:
-            logger.error(f"get_token error: {e}")
-            return ""
-
-    def send_text(self, user_id: str, text: str) -> bool:
-        if not self._enabled:
-            logger.warning("Push client not enabled, falling back to webhook")
-            return False
-        token = self._get_access_token()
-        if not token:
-            return False
-        try:
-            url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
-            payload = {
-                "touser": user_id,
-                "agentid": int(self.agent_id),
-                "msgtype": "text",
-                "text": {"content": text}
-            }
-            resp = requests.post(url, json=payload, timeout=10).json()
-            if resp.get("errcode", 1) != 0:
-                logger.error(f"Push failed: {resp}")
-                return False
-            logger.info(f"Push OK to {user_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Push error: {e}")
-            return False
-
-push_client = WecomPushClient()
+# === 消息去重（防止企微重试导致重复处理）===
+_processing: dict[str, dict] = {}  # msgid -> {"done": threading.Event(), "reply": str}
+_processing_lock = threading.Lock()
 
 @app.route('/wecom', methods=['GET', 'POST'])
 def wecom_gateway():
@@ -237,27 +181,49 @@ def wecom_gateway():
             msg_json = None
 
         if is_ai_bot_mode:
-            # --- AI Bot 新接口 ---
+            # --- Kit (智能机器人) ---
+            msg_id = msg_json.get("msgid", "")
             user_id = msg_json.get("from", {}).get("userid", "unknown")
             msg_type = msg_json.get("msgtype", "")
+            response_url = msg_json.get("response_url", "")
             content = msg_json.get("text", {}).get("content", "")
 
             if msg_type == "text":
-                logger.info(f"[AI Bot] Received msg from {user_id}: {content}")
-                # Async: return success immediately, process in background
+                # Check for duplicate (WeCom retry)
+                with _processing_lock:
+                    if msg_id in _processing:
+                        logger.info(f"[Kit] Duplicate msg {msg_id[:8]}..., returning success immediately")
+                        return "success"
+                    _processing[msg_id] = {"done": threading.Event(), "reply": None}
+
+                logger.info(f"[Kit] Received msg {msg_id[:8]}... from {user_id}: {content}")
+
                 def _async_reply():
                     try:
                         t_start = time.time()
                         ai_reply = process_message_via_agents(content, user_id)
                         t_elapsed = time.time() - t_start
-                        logger.info(f"[AI Bot] Reply generated in {t_elapsed:.1f}s: {ai_reply[:80]}...")
-                        # Push via WeCom application API
-                        if push_client.send_text(user_id, ai_reply):
-                            logger.info(f"[AI Bot] Reply pushed to {user_id}")
+                        logger.info(f"[Kit] Reply generated in {t_elapsed:.1f}s")
+
+                        # Push via response_url (works async, just WeCom doesn't wait)
+                        resp = requests.post(response_url, json={
+                            "msgtype": "text",
+                            "text": {"content": ai_reply}
+                        }, timeout=15)
+                        if resp.status_code == 200:
+                            logger.info(f"[Kit] Reply sent via response_url: {resp.status_code}")
                         else:
-                            logger.error(f"[AI Bot] Push failed for {user_id}")
+                            logger.error(f"[Kit] response_url failed: {resp.status_code} {resp.text}")
                     except Exception as e:
-                        logger.error(f"[AI Bot] Async pipeline FAILED: {type(e).__name__}: {e}", exc_info=True)
+                        logger.error(f"[Kit] Async pipeline FAILED: {type(e).__name__}: {e}", exc_info=True)
+                    finally:
+                        with _processing_lock:
+                            _processing[msg_id]["done"].set()
+                            # Clean up old entries
+                            stale = [k for k, v in _processing.items() if v["done"].is_set()]
+                            for k in stale[:50]:
+                                del _processing[k]
+
                 threading.Thread(target=_async_reply, daemon=True).start()
                 return "success"
         else:
