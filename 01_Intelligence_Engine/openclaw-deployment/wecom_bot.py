@@ -125,6 +125,62 @@ app = Flask(__name__)
 _processing: dict[str, dict] = {}  # msgid -> {"done": threading.Event(), "reply": str}
 _processing_lock = threading.Lock()
 
+# === 企微主动推送（异步回复备用通道，通过自建应用 API）===
+class WecomPushClient:
+    """Send messages to users via WeCom Application Message API."""
+    def __init__(self):
+        self.agent_id = os.getenv("WECOM_AGENT_ID", "")
+        self.app_secret = os.getenv("WECOM_APP_SECRET", "")
+        self.corp_id = os.getenv("WECHAT_CORP_ID", "")
+        self._access_token = None
+        self._token_expires_at = 0
+        self._enabled = bool(self.agent_id and self.app_secret)
+
+    def _get_access_token(self) -> str:
+        if time.time() < self._token_expires_at and self._access_token:
+            return self._access_token
+        try:
+            url = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
+            resp = requests.get(url, params={
+                "corpid": self.corp_id,
+                "corpsecret": self.app_secret
+            }, timeout=10).json()
+            if "access_token" in resp:
+                self._access_token = resp["access_token"]
+                self._token_expires_at = time.time() + resp.get("expires_in", 7000) - 200
+                return self._access_token
+            logger.error(f"Failed to get access_token: {resp}")
+            return ""
+        except Exception as e:
+            logger.error(f"get_token error: {e}")
+            return ""
+
+    def send_text(self, user_id: str, text: str) -> bool:
+        if not self._enabled:
+            return False
+        token = self._get_access_token()
+        if not token:
+            return False
+        try:
+            url = f"https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}"
+            payload = {
+                "touser": user_id,
+                "agentid": int(self.agent_id),
+                "msgtype": "text",
+                "text": {"content": text}
+            }
+            resp = requests.post(url, json=payload, timeout=10).json()
+            if resp.get("errcode", 1) != 0:
+                logger.error(f"Push failed: {resp}")
+                return False
+            logger.info(f"Push OK to {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Push error: {e}")
+            return False
+
+push_client = WecomPushClient()
+
 @app.route('/wecom', methods=['GET', 'POST'])
 def wecom_gateway():
     token = os.getenv("WECHAT_TOKEN")
@@ -205,21 +261,24 @@ def wecom_gateway():
                         t_elapsed = time.time() - t_start
                         logger.info(f"[Kit] Reply generated in {t_elapsed:.1f}s")
 
-                        # Push via response_url (works async, just WeCom doesn't wait)
+                        # Try response_url first (may expire after callback returns)
                         resp = requests.post(response_url, json={
                             "msgtype": "text",
                             "text": {"content": ai_reply}
-                        }, timeout=15)
+                        }, timeout=10)
                         if resp.status_code == 200:
                             logger.info(f"[Kit] Reply sent via response_url: {resp.status_code}")
                         else:
-                            logger.error(f"[Kit] response_url failed: {resp.status_code} {resp.text}")
+                            logger.warning(f"[Kit] response_url failed ({resp.status_code}), falling back to app push")
+                            if push_client.send_text(user_id, ai_reply):
+                                logger.info(f"[Kit] Reply pushed to {user_id}")
+                            else:
+                                logger.error(f"[Kit] Push also failed for {user_id}")
                     except Exception as e:
                         logger.error(f"[Kit] Async pipeline FAILED: {type(e).__name__}: {e}", exc_info=True)
                     finally:
                         with _processing_lock:
                             _processing[msg_id]["done"].set()
-                            # Clean up old entries
                             stale = [k for k, v in _processing.items() if v["done"].is_set()]
                             for k in stale[:50]:
                                 del _processing[k]
