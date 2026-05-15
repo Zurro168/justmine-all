@@ -1,3 +1,4 @@
+import json
 import os
 import hashlib
 import base64
@@ -6,7 +7,7 @@ import logging
 import time
 import requests
 import xml.etree.ElementTree as ET
-from flask import Flask, request, make_response
+from flask import Flask, request, make_response, jsonify
 from Crypto.Cipher import AES
 
 # 初始化日志
@@ -141,32 +142,43 @@ def wecom_gateway():
 
     # 2. 处理用户消息 (POST)
     try:
-        # 解密消息
-        xml_data = request.get_data()
-        logger.info(f"[DEBUG] Raw POST body ({len(xml_data)} bytes): {xml_data[:200]}")
+        raw_body = request.get_data()
+        logger.info(f"[DEBUG] Raw POST body ({len(raw_body)} bytes): {raw_body[:200]}")
         logger.info(f"[DEBUG] Content-Type: {request.content_type}")
-        if not xml_data:
+        if not raw_body:
             logger.error("Empty POST body received")
             return "success"
-        root = ET.fromstring(xml_data)
-        encrypt_msg = root.find("Encrypt").text
-        
+
+        # 企微支持两种格式：JSON（新）和 XML（旧）
+        is_json_mode = False
+        raw_body_str = raw_body.decode("utf-8")
+        try:
+            body_json = json.loads(raw_body_str)
+            encrypt_msg = body_json.get("encrypt", "")
+            is_json_mode = True
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # Fallback to XML format
+            root = ET.fromstring(raw_body)
+            encrypt_msg = root.find("Encrypt").text
+
         xml_content, err = crypto.decrypt(encrypt_msg, msg_signature, timestamp, nonce)
-        if err: return make_response("decrypt failed", 403)
-        
+        if err:
+            logger.error(f"Decrypt failed: {err}")
+            return make_response("decrypt failed", 403)
+
         # 解析 XML 内容
         msg_root = ET.fromstring(xml_content)
         msg_type = msg_root.find("MsgType").text
         user_id = msg_root.find("FromUserName").text
-        
+
         if msg_type == "text":
             content = msg_root.find("Content").text
             logger.info(f"Received msg from {user_id}: {content}")
-            
+
             # 调用 AI
             ai_reply = process_message_via_agents(content, user_id)
-            
-            # 构造回复 XML
+
+            # 构造回复 XML（企微内部始终是 XML 加密）
             reply_tpl = """<xml>
                 <ToUserName><![CDATA[{to}]]></ToUserName>
                 <FromUserName><![CDATA[{from_me}]]></FromUserName>
@@ -180,9 +192,17 @@ def wecom_gateway():
                 ts=int(time.time()),
                 content=ai_reply
             )
-            
-            # 加密并返回
-            return crypto.encrypt(reply_xml, nonce)
+
+            # 加密
+            encrypted_reply = crypto.encrypt(reply_xml, nonce)
+
+            # 企微 JSON 模式下，回复也用 JSON 格式（只返回 encrypt 字段）
+            if is_json_mode:
+                reply_root = ET.fromstring(encrypted_reply)
+                encrypt_val = reply_root.find("Encrypt").text
+                return jsonify({"encrypt": encrypt_val})
+            else:
+                return encrypted_reply
             
     except Exception as e:
         logger.error(f"Post error: {str(e)}")
