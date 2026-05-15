@@ -169,43 +169,70 @@ def wecom_gateway():
 
         logger.info(f"[DEBUG] Decrypted content: {xml_content}")
 
-        # 解析 XML 内容
-        msg_root = ET.fromstring(xml_content)
-        msg_type = msg_root.find("MsgType").text
-        user_id = msg_root.find("FromUserName").text
+        # 企微 AI Bot 新接口解密后是 JSON，旧接口是 XML
+        is_ai_bot_mode = False
+        try:
+            msg_json = json.loads(xml_content)
+            is_ai_bot_mode = True
+        except json.JSONDecodeError:
+            msg_json = None
 
-        if msg_type == "text":
-            content = msg_root.find("Content").text
-            logger.info(f"Received msg from {user_id}: {content}")
+        if is_ai_bot_mode:
+            # --- AI Bot 新接口 ---
+            user_id = msg_json.get("from", {}).get("userid", "unknown")
+            msg_type = msg_json.get("msgtype", "")
+            response_url = msg_json.get("response_url", "")
+            content = msg_json.get("text", {}).get("content", "")
 
-            # 调用 AI
-            ai_reply = process_message_via_agents(content, user_id)
+            if msg_type == "text":
+                logger.info(f"[AI Bot] Received msg from {user_id}: {content}")
+                ai_reply = process_message_via_agents(content, user_id)
 
-            # 构造回复 XML（企微内部始终是 XML 加密）
-            reply_tpl = """<xml>
-                <ToUserName><![CDATA[{to}]]></ToUserName>
-                <FromUserName><![CDATA[{from_me}]]></FromUserName>
-                <CreateTime>{ts}</CreateTime>
-                <MsgType><![CDATA[text]]></MsgType>
-                <Content><![CDATA[{content}]]></Content>
-            </xml>"""
-            reply_xml = reply_tpl.format(
-                to=user_id,
-                from_me=corp_id,
-                ts=int(time.time()),
-                content=ai_reply
-            )
+                # 通过 response_url 发送回复
+                try:
+                    resp = requests.post(response_url, json={
+                        "msgtype": "text",
+                        "text": {"content": ai_reply}
+                    }, timeout=10)
+                    logger.info(f"[AI Bot] Reply sent: {resp.status_code}")
+                except Exception as e:
+                    logger.error(f"[AI Bot] Reply failed: {e}")
 
-            # 加密
-            encrypted_reply = crypto.encrypt(reply_xml, nonce)
+                return "success"
+        else:
+            # --- 旧 XML 接口 ---
+            msg_root = ET.fromstring(xml_content)
+            msg_type = msg_root.find("MsgType").text
+            user_id = msg_root.find("FromUserName").text
 
-            # 企微 JSON 模式下，回复也用 JSON 格式（只返回 encrypt 字段）
-            if is_json_mode:
-                reply_root = ET.fromstring(encrypted_reply)
-                encrypt_val = reply_root.find("Encrypt").text
-                return jsonify({"encrypt": encrypt_val})
-            else:
-                return encrypted_reply
+            if msg_type == "text":
+                content = msg_root.find("Content").text
+                logger.info(f"Received msg from {user_id}: {content}")
+
+                ai_reply = process_message_via_agents(content, user_id)
+
+                reply_tpl = """<xml>
+                    <ToUserName><![CDATA[{to}]]></ToUserName>
+                    <FromUserName><![CDATA[{from_me}]]></FromUserName>
+                    <CreateTime>{ts}</CreateTime>
+                    <MsgType><![CDATA[text]]></MsgType>
+                    <Content><![CDATA[{content}]]></Content>
+                </xml>"""
+                reply_xml = reply_tpl.format(
+                    to=user_id,
+                    from_me=corp_id,
+                    ts=int(time.time()),
+                    content=ai_reply
+                )
+
+                encrypted_reply = crypto.encrypt(reply_xml, nonce)
+
+                if is_json_mode:
+                    reply_root = ET.fromstring(encrypted_reply)
+                    encrypt_val = reply_root.find("Encrypt").text
+                    return jsonify({"encrypt": encrypt_val})
+                else:
+                    return encrypted_reply
             
     except Exception as e:
         logger.error(f"Post error: {str(e)}")
