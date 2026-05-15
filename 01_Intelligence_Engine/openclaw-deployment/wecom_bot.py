@@ -82,13 +82,16 @@ factory = OpenClawAgentFactory(
 
 def process_message_via_agents(user_message: str, user_id: str) -> str:
     """Route message through Jaguar and execute the target agent."""
+    logger.info(f"[Pipeline] Step 1: Dispatching task for user {user_id}")
     routing = factory.dispatch_task(user_message)
     target = routing.get("target_agent", "scout")
+    logger.info(f"[Pipeline] Step 2: Executing agent '{target}'")
     reply = factory.execute_agent(target, user_message, {
         "user_id": user_id,
         "source": "wecom",
         "routing_params": routing.get("extracted_parameters", {})
     })
+    logger.info(f"[Pipeline] Step 3: Reply generated ({len(reply)} chars)")
     return reply
 
 def ask_deepseek(question):
@@ -181,10 +184,15 @@ def wecom_gateway():
 
             if msg_type == "text":
                 logger.info(f"[AI Bot] Received msg from {user_id}: {content}")
-                t_start = time.time()
-                ai_reply = process_message_via_agents(content, user_id)
-                t_elapsed = time.time() - t_start
-                logger.info(f"[AI Bot] AI reply generated in {t_elapsed:.1f}s: {ai_reply[:80]}...")
+                try:
+                    t_start = time.time()
+                    ai_reply = process_message_via_agents(content, user_id)
+                    t_elapsed = time.time() - t_start
+                    logger.info(f"[AI Bot] AI reply generated in {t_elapsed:.1f}s: {ai_reply[:80]}...")
+                except Exception as e:
+                    logger.error(f"[AI Bot] Agent pipeline FAILED: {type(e).__name__}: {e}", exc_info=True)
+                    ai_reply = f"处理消息时出错: {str(e)[:100]}"
+                    logger.info(f"[AI Bot] Sending error fallback reply")
 
                 # 通过 response_url 发送回复
                 try:
