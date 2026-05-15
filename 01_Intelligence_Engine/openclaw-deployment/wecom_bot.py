@@ -125,6 +125,43 @@ app = Flask(__name__)
 _processing: dict[str, dict] = {}  # msgid -> {"done": threading.Event(), "reply": str}
 _processing_lock = threading.Lock()
 
+# === 推送策略 ===
+# Kit 群聊：用 webhook URL 回复（无 response_url 异步限制）
+# 1v1 私聊：用自建应用推送 API
+def send_reply_to_source(user_id: str, ai_reply: str, response_url: str, is_group: bool = False) -> bool:
+    """Send reply via the best available channel."""
+    # 群聊优先用 webhook
+    if is_group:
+        webhook = os.getenv("WECOM_WEBHOOK_URL", "")
+        if webhook:
+            try:
+                resp = requests.post(webhook, json={
+                    "msgtype": "text",
+                    "text": {"content": ai_reply}
+                }, timeout=10)
+                if resp.status_code == 200:
+                    logger.info(f"[Kit] Reply sent via webhook to group")
+                    return True
+                logger.error(f"[Kit] Webhook failed: {resp.status_code} {resp.text}")
+            except Exception as e:
+                logger.error(f"[Kit] Webhook error: {e}")
+
+    # 私聊用应用推送 API
+    if push_client.send_text(user_id, ai_reply):
+        logger.info(f"[Kit] Reply pushed to {user_id}")
+        return True
+
+    # 最后尝试 response_url
+    try:
+        resp = requests.post(response_url, json={
+            "msgtype": "text",
+            "text": {"content": ai_reply}
+        }, timeout=10)
+        logger.info(f"[Kit] response_url: {resp.status_code}")
+    except Exception as e:
+        logger.error(f"[Kit] All reply channels failed: {e}")
+    return False
+
 # === 企微主动推送（异步回复备用通道，通过自建应用 API）===
 class WecomPushClient:
     """Send messages to users via WeCom Application Message API."""
@@ -260,18 +297,7 @@ def wecom_gateway():
                         ai_reply = process_message_via_agents(content, user_id)
                         t_elapsed = time.time() - t_start
                         logger.info(f"[Kit] Reply generated in {t_elapsed:.1f}s")
-
-                        # response_url always returns 200 but won't display async replies
-                        # Always use app push when available
-                        if push_client.send_text(user_id, ai_reply):
-                            logger.info(f"[Kit] Reply pushed to {user_id}")
-                        else:
-                            logger.warning(f"[Kit] App push not available, trying response_url")
-                            resp = requests.post(response_url, json={
-                                "msgtype": "text",
-                                "text": {"content": ai_reply}
-                            }, timeout=10)
-                            logger.info(f"[Kit] response_url: {resp.status_code}")
+                        send_reply_to_source(user_id, ai_reply, response_url)
                     except Exception as e:
                         logger.error(f"[Kit] Async pipeline FAILED: {type(e).__name__}: {e}", exc_info=True)
                     finally:
