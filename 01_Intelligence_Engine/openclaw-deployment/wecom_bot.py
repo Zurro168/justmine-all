@@ -181,7 +181,10 @@ def wecom_gateway():
 
             if msg_type == "text":
                 logger.info(f"[AI Bot] Received msg from {user_id}: {content}")
+                t_start = time.time()
                 ai_reply = process_message_via_agents(content, user_id)
+                t_elapsed = time.time() - t_start
+                logger.info(f"[AI Bot] AI reply generated in {t_elapsed:.1f}s: {ai_reply[:80]}...")
 
                 # 通过 response_url 发送回复
                 try:
