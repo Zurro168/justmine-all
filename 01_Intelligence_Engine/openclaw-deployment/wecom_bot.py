@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import hashlib
 import base64
 import struct
@@ -8,6 +9,7 @@ import time
 import threading
 import requests
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from flask import Flask, request, make_response, jsonify
 from Crypto.Cipher import AES
 
@@ -80,6 +82,79 @@ from agent_factory_v2 import OpenClawAgentFactory
 factory = OpenClawAgentFactory(
     config_path=os.path.join(os.path.dirname(__file__), "..", "bots", "openclaw_prompts_v2.json")
 )
+
+# === 文件归档系统 ===
+ARCHIVE_ROOT = os.path.join(os.path.dirname(__file__), "archive")
+os.makedirs(ARCHIVE_ROOT, exist_ok=True)
+
+# 文件分类规则（基于文件名关键词）
+FILE_CATEGORIES = {
+    "invoice": ["invoice", "commercial invoice", "发票", "fapiao"],
+    "bill_of_lading": ["bill of lading", "b/l", "提单", "ocean bill"],
+    "packing_list": ["packing list", "pl", "装箱单"],
+    "certificate_of_origin": ["certificate of origin", "co", "原产地证", "产地证"],
+    "quality_inspection": ["sgs", "ahk", "inspection", "品检", "质检", "quality report", "分析报告"],
+    "contract": ["contract", "合同", "agreement", "proforma"],
+    "customs": ["customs", "报关", "清关"],
+    "other": []
+}
+
+def classify_file(filename: str) -> str:
+    """根据文件名关键词判断文件类型"""
+    fname_lower = filename.lower()
+    for category, keywords in FILE_CATEGORIES.items():
+        if category == "other":
+            continue
+        for kw in keywords:
+            if kw in fname_lower:
+                return category
+    return "other"
+
+def archive_file(data: bytes, filename: str, sender: str, msg_id: str) -> str:
+    """下载并归档文件，返回归档路径"""
+    category = classify_file(filename)
+    # 分类目录名
+    cat_names = {
+        "invoice": "01_发票",
+        "bill_of_lading": "02_提单",
+        "packing_list": "03_装箱单",
+        "certificate_of_origin": "04_原产地证",
+        "quality_inspection": "05_质检报告",
+        "contract": "06_合同协议",
+        "customs": "07_报关清关",
+        "other": "00_其他"
+    }
+    cat_dir = cat_names.get(category, "00_其他")
+
+    # 日期目录
+    date_dir = datetime.now().strftime("%Y%m%d")
+    archive_path = os.path.join(ARCHIVE_ROOT, cat_dir, date_dir)
+    os.makedirs(archive_path, exist_ok=True)
+
+    # 重命名: 类别_时间_发件人_原文件名
+    ts = datetime.now().strftime("%H%M%S")
+    safe_name = re.sub(r'[^\w\.\-一-鿿]', '_', filename)
+    archived_name = f"{category}_{ts}_{sender}_{safe_name}"
+
+    full_path = os.path.join(archive_path, archived_name)
+    with open(full_path, "wb") as f:
+        f.write(data)
+    logger.info(f"[Archive] File saved: {full_path} (category: {cat_dir})")
+    return full_path
+
+def download_wecom_media(media_id: str) -> bytes:
+    """从企微下载媒体文件"""
+    token = push_client._get_access_token()
+    if not token:
+        raise RuntimeError("Failed to get access_token for media download")
+    url = f"https://qyapi.weixin.qq.com/cgi-bin/media/get?access_token={token}&media_id={media_id}"
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
+    # 企微可能返回错误 JSON 而不是文件流
+    if resp.headers.get("Content-Type", "").startswith("application/json"):
+        err = resp.json()
+        raise RuntimeError(f"Media download failed: {err}")
+    return resp.content
 
 def process_message_via_agents(user_message: str, user_id: str) -> str:
     """Route message through Jaguar and execute the target agent."""
@@ -308,6 +383,74 @@ def wecom_gateway():
                                 del _processing[k]
 
                 threading.Thread(target=_async_reply, daemon=True).start()
+                return "success"
+
+            elif msg_type == "file":
+                # 群聊文件自动归档+审单
+                file_info = msg_json.get("file", {})
+                media_id = file_info.get("media_id", "")
+                file_title = file_info.get("title", "unknown")
+                file_size = file_info.get("file_size", 0)
+
+                with _processing_lock:
+                    if msg_id in _processing:
+                        return "success"
+                    _processing[msg_id] = {"done": threading.Event(), "reply": None}
+
+                logger.info(f"[Kit] File received: {file_title} ({file_size} bytes) from {user_id}")
+
+                def _async_file_process():
+                    try:
+                        # 1. 下载文件
+                        file_data = download_wecom_media(media_id)
+                        logger.info(f"[Kit] File downloaded: {file_title} ({len(file_data)} bytes)")
+
+                        # 2. 归档
+                        saved_path = archive_file(file_data, file_title, user_id, msg_id)
+
+                        # 3. 判断是否触发审单
+                        category = classify_file(file_title)
+                        if category in ("invoice", "bill_of_lading", "packing_list", "quality_inspection"):
+                            # 自动交给 Docu-Checker 分析
+                            prompt = (
+                                f"客户在群里刚刚上传了文件：{file_title}（类型：{category}）\n"
+                                f"该文件已归档到 {saved_path}\n"
+                                f"请根据文件类型给出专业的审核建议。注意：你无法直接读取文件内容，"
+                                f"请告知业务员需要人工核对的关键字段，并列出该类型单证的常见风险点。"
+                            )
+                            ai_reply = process_message_via_agents(prompt, user_id)
+                        else:
+                            # 其他文件：确认归档
+                            cat_names = {
+                                "invoice": "发票", "bill_of_lading": "提单", "packing_list": "装箱单",
+                                "certificate_of_origin": "原产地证", "quality_inspection": "质检报告",
+                                "contract": "合同协议", "customs": "报关清关", "other": "其他"
+                            }
+                            ai_reply = (
+                                f"📁 **文件已归档**\n"
+                                f"文件名：{file_title}\n"
+                                f"类型：{cat_names.get(category, '未知')}\n"
+                                f"发件人：{user_id}\n"
+                                f"存档路径：{saved_path}\n\n"
+                                f"如需审核此单证，请发送指令："审核此文件""
+                            )
+
+                        send_reply_to_source(user_id, ai_reply, response_url)
+                        logger.info(f"[Kit] File processed and replied for {user_id}")
+                    except Exception as e:
+                        logger.error(f"[Kit] File processing FAILED: {type(e).__name__}: {e}", exc_info=True)
+                        try:
+                            send_reply_to_source(user_id, f"⚠️ 文件处理失败：{str(e)[:100]}", response_url)
+                        except Exception:
+                            pass
+                    finally:
+                        with _processing_lock:
+                            _processing[msg_id]["done"].set()
+                            stale = [k for k, v in _processing.items() if v["done"].is_set()]
+                            for k in stale[:50]:
+                                del _processing[k]
+
+                threading.Thread(target=_async_file_process, daemon=True).start()
                 return "success"
         else:
             # --- 旧 XML 接口 ---
