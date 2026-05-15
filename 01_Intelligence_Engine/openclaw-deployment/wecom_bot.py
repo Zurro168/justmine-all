@@ -142,7 +142,12 @@ def wecom_gateway():
     # 2. 处理用户消息 (POST)
     try:
         # 解密消息
-        xml_data = request.data
+        xml_data = request.get_data()
+        logger.info(f"[DEBUG] Raw POST body ({len(xml_data)} bytes): {xml_data[:200]}")
+        logger.info(f"[DEBUG] Content-Type: {request.content_type}")
+        if not xml_data:
+            logger.error("Empty POST body received")
+            return "success"
         root = ET.fromstring(xml_data)
         encrypt_msg = root.find("Encrypt").text
         
