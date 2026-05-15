@@ -234,6 +234,51 @@ def download_wecom_media(media_id: str) -> bytes:
         raise RuntimeError(f"Media download failed: {err}")
     return resp.content
 
+# === Notion 归档记录 ===
+def create_notion_record(filename: str, category: str, sender: str, saved_path: str, file_size: int, description: str = "") -> bool:
+    """在 Notion 数据库创建一条文件归档记录"""
+    api_key = os.getenv("NOTION_API_KEY", "")
+    database_id = os.getenv("NOTION_DATABASE_ID", "")
+    if not api_key or not database_id:
+        logger.warning("Notion not configured, skipping archive record")
+        return False
+
+    cat_display = CAT_DIR_NAMES.get(category, "未知")
+    now_iso = datetime.now().isoformat()
+
+    payload = {
+        "parent": {"database_id": database_id},
+        "properties": {
+            "文件名": {"title": [{"text": {"content": filename}}]},
+            "类型": {"select": {"name": cat_display}},
+            "发件人": {"rich_text": [{"text": {"content": sender}}]},
+            "归档路径": {"rich_text": [{"text": {"content": saved_path}}]},
+            "大小(KB)": {"number": round(file_size / 1024, 1)},
+            "归档时间": {"date": {"start": now_iso}},
+            "备注": {"rich_text": [{"text": {"content": description}}]},
+        }
+    }
+
+    try:
+        resp = requests.post(
+            "https://api.notion.com/v1/pages",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Notion-Version": "2022-06-28",
+                "Content-Type": "application/json"
+            },
+            json=payload,
+            timeout=15
+        )
+        if resp.status_code == 200:
+            logger.info(f"[Notion] Archive record created: {filename}")
+            return True
+        logger.error(f"[Notion] Failed: {resp.status_code} {resp.text}")
+        return False
+    except Exception as e:
+        logger.error(f"[Notion] Error: {e}")
+        return False
+
 def process_message_via_agents(user_message: str, user_id: str) -> str:
     """Route message through Jaguar and execute the target agent."""
     logger.info(f"[Pipeline] Step 1: Dispatching task for user {user_id}")
@@ -501,7 +546,10 @@ def wecom_gateway():
                         # 3. 归档
                         saved_path = archive_file(file_data, file_title, user_id, msg_id, category)
 
-                        # 4. 根据类型决定回复策略
+                        # 4. 写入 Notion 归档记录
+                        create_notion_record(file_title, category, user_id, saved_path, len(file_data), info["description"])
+
+                        # 5. 根据类型决定回复策略
                         if info["is_single_doc"]:
                             # 单证类：自动交给 Docu-Checker
                             prompt = (
