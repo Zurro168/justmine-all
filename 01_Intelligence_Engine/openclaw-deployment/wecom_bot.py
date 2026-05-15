@@ -143,8 +143,6 @@ def wecom_gateway():
     # 2. 处理用户消息 (POST)
     try:
         raw_body = request.get_data()
-        logger.info(f"[DEBUG] Raw POST body ({len(raw_body)} bytes): {raw_body[:200]}")
-        logger.info(f"[DEBUG] Content-Type: {request.content_type}")
         if not raw_body:
             logger.error("Empty POST body received")
             return "success"
@@ -162,12 +160,9 @@ def wecom_gateway():
             encrypt_msg = root.find("Encrypt").text
 
         xml_content, err = crypto.decrypt(encrypt_msg, msg_signature, timestamp, nonce)
-        logger.info(f"[DEBUG] Decrypt result - err={err}, xml_content={repr(xml_content)}")
         if err:
             logger.error(f"Decrypt failed: {err}")
             return make_response("decrypt failed", 403)
-
-        logger.info(f"[DEBUG] Decrypted content: {xml_content}")
 
         # 企微 AI Bot 新接口解密后是 JSON，旧接口是 XML
         is_ai_bot_mode = False
