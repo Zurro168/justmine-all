@@ -1,12 +1,21 @@
 {
     "market_indices": {
-        "000360": "锆产业指数 (Zircon Industry)",
-        "000300": "钛矿综合指数 (Ti-Ore Composite)",
-        "000310": "四川钛精矿现货 (Sichuan Ti-Ore)",
-        "000330": "海绵钛现货指数 (Titanium Sponge)",
-        "000311": "钛白粉综合指数 (TiO2 Index)"
+        "000300": "钛矿综合指数",
+        "000310": "四川钛精矿(Ti>47%)",
+        "000312": "广东钛精矿",
+        "000320": "金红石(Rutile)",
+        "000340": "锆精矿(ZrSiO4 65%)",
+        "000341": "独居石(Monazite)",
+        "000350": "高钛 slag(高钛渣 85%)",
+        "000311": "钛白粉综合指数",
+        "000313": "钛白粉(金红石型R248)",
+        "000010": "波罗的海干散货指数(BDI)",
+        "000020": "巴拿马型运费指数(BPI)"
     },
-    "history_years": 3,
+    "news_sources": {
+        "mine_regions": ["尼日利亚", "莫桑比克", "塞拉利昂", "澳大利亚", "肯尼亚", "南非"],
+        "major_companies": ["Iluka", "Rio Tinto", "Tronox", "Kenmare", "Base Resources", "力拓", "澳矿"]
+    },
     "schedule": {
         "hour": 8,
         "minute": 30
