@@ -261,19 +261,17 @@ def wecom_gateway():
                         t_elapsed = time.time() - t_start
                         logger.info(f"[Kit] Reply generated in {t_elapsed:.1f}s")
 
-                        # Try response_url first (may expire after callback returns)
-                        resp = requests.post(response_url, json={
-                            "msgtype": "text",
-                            "text": {"content": ai_reply}
-                        }, timeout=10)
-                        if resp.status_code == 200:
-                            logger.info(f"[Kit] Reply sent via response_url: {resp.status_code}")
+                        # response_url always returns 200 but won't display async replies
+                        # Always use app push when available
+                        if push_client.send_text(user_id, ai_reply):
+                            logger.info(f"[Kit] Reply pushed to {user_id}")
                         else:
-                            logger.warning(f"[Kit] response_url failed ({resp.status_code}), falling back to app push")
-                            if push_client.send_text(user_id, ai_reply):
-                                logger.info(f"[Kit] Reply pushed to {user_id}")
-                            else:
-                                logger.error(f"[Kit] Push also failed for {user_id}")
+                            logger.warning(f"[Kit] App push not available, trying response_url")
+                            resp = requests.post(response_url, json={
+                                "msgtype": "text",
+                                "text": {"content": ai_reply}
+                            }, timeout=10)
+                            logger.info(f"[Kit] response_url: {resp.status_code}")
                     except Exception as e:
                         logger.error(f"[Kit] Async pipeline FAILED: {type(e).__name__}: {e}", exc_info=True)
                     finally:
