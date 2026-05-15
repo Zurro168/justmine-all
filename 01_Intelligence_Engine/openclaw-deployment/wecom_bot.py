@@ -87,22 +87,72 @@ factory = OpenClawAgentFactory(
 ARCHIVE_ROOT = os.path.join(os.path.dirname(__file__), "archive")
 os.makedirs(ARCHIVE_ROOT, exist_ok=True)
 
-# 文件分类规则（基于文件名关键词）
-FILE_CATEGORIES = {
-    "invoice": ["invoice", "commercial invoice", "发票", "fapiao"],
-    "bill_of_lading": ["bill of lading", "b/l", "提单", "ocean bill"],
-    "packing_list": ["packing list", "pl", "装箱单"],
-    "certificate_of_origin": ["certificate of origin", "co", "原产地证", "产地证"],
-    "quality_inspection": ["sgs", "ahk", "inspection", "品检", "质检", "quality report", "分析报告"],
-    "contract": ["contract", "合同", "agreement", "proforma"],
-    "customs": ["customs", "报关", "清关"],
+# 文件扩展名 → 格式
+FORMAT_MAP = {
+    ".pdf": "PDF", ".jpg": "JPG", ".jpeg": "JPG", ".png": "PNG",
+    ".gif": "GIF", ".bmp": "BMP", ".doc": "DOC", ".docx": "DOCX",
+    ".xls": "XLS", ".xlsx": "XLSX", ".csv": "CSV", ".zip": "ZIP",
+    ".rar": "RAR", ".txt": "TXT", ".tif": "TIF", ".tiff": "TIFF",
+}
+
+# 文件名关键词 → 业务类型（覆盖中英文 + 常见变体）
+FILE_KEYWORDS = {
+    "invoice": [
+        "invoice", "commercial invoice", "ci", "invoice number",
+        "发票", "商业发票", "fapiao", "factura",
+        "proforma invoice", "performa"
+    ],
+    "bill_of_lading": [
+        "bill of lading", "b/l", "bl", "ocean bill", "sea bill",
+        "提单", "海运提单", "海运单",
+        "bill of landing", "consignment note", "waybill"
+    ],
+    "packing_list": [
+        "packing list", "pack list", "pl", "package list",
+        "装箱单", "包装清单",
+        "detailed packing", "weight list", "weight note"
+    ],
+    "certificate_of_origin": [
+        "certificate of origin", "origin certificate", "coo", "c/o",
+        "原产地证", "产地证", "origin",
+        "form e", "form a", "certificate of origin"
+    ],
+    "quality_inspection": [
+        "sgs", "ahk", "inspection", "inspection report", "quality",
+        "品检", "质检", "品质报告", "分析报告", "品质证书",
+        "assay", "analysis", "certificate of analysis", "coa",
+        "survey", "survey report", "test report"
+    ],
+    "contract": [
+        "contract", "agreement", "proforma", "sales contract",
+        "合同", "采购合同", "销售合同", "协议",
+        "purchase order", "sales confirmation", "pi"
+    ],
+    "customs": [
+        "customs", "declaration", "custom declaration",
+        "报关", "清关", "报关单", "海关",
+        "clearance", "import declaration", "export declaration"
+    ],
     "other": []
 }
 
+CAT_DIR_NAMES = {
+    "invoice": "01_发票",
+    "bill_of_lading": "02_提单",
+    "packing_list": "03_装箱单",
+    "certificate_of_origin": "04_原产地证",
+    "quality_inspection": "05_质检报告",
+    "contract": "06_合同协议",
+    "customs": "07_报关清关",
+    "image": "08_现场照片",
+    "other": "00_其他"
+}
+
 def classify_file(filename: str) -> str:
-    """根据文件名关键词判断文件类型"""
-    fname_lower = filename.lower()
-    for category, keywords in FILE_CATEGORIES.items():
+    """根据文件名判断文件类型，支持中英文 + 常见缩写"""
+    fname_lower = filename.lower().strip()
+    # 先匹配完整关键词
+    for category, keywords in FILE_KEYWORDS.items():
         if category == "other":
             continue
         for kw in keywords:
@@ -110,37 +160,65 @@ def classify_file(filename: str) -> str:
                 return category
     return "other"
 
-def archive_file(data: bytes, filename: str, sender: str, msg_id: str) -> str:
+def get_file_ext(filename: str) -> str:
+    """安全获取文件扩展名"""
+    _, ext = os.path.splitext(filename)
+    return ext.lower() or ".unknown"
+
+def archive_file(data: bytes, filename: str, sender: str, msg_id: str, category: str = None) -> str:
     """下载并归档文件，返回归档路径"""
-    category = classify_file(filename)
-    # 分类目录名
-    cat_names = {
-        "invoice": "01_发票",
-        "bill_of_lading": "02_提单",
-        "packing_list": "03_装箱单",
-        "certificate_of_origin": "04_原产地证",
-        "quality_inspection": "05_质检报告",
-        "contract": "06_合同协议",
-        "customs": "07_报关清关",
-        "other": "00_其他"
-    }
-    cat_dir = cat_names.get(category, "00_其他")
+    if category is None:
+        category = classify_file(filename)
+    cat_dir = CAT_DIR_NAMES.get(category, "00_其他")
 
     # 日期目录
     date_dir = datetime.now().strftime("%Y%m%d")
     archive_path = os.path.join(ARCHIVE_ROOT, cat_dir, date_dir)
     os.makedirs(archive_path, exist_ok=True)
 
-    # 重命名: 类别_时间_发件人_原文件名
+    # 重命名: 类别_时间_发件人_md5哈希_原文件名
     ts = datetime.now().strftime("%H%M%S")
-    safe_name = re.sub(r'[^\w\.\-一-鿿]', '_', filename)
-    archived_name = f"{category}_{ts}_{sender}_{safe_name}"
+    file_hash = hashlib.md5(data).hexdigest()[:8]
+    safe_name = re.sub(r'[^\w\.\-]', '_', filename)[:50]
+    archived_name = f"{category}_{ts}_{sender}_{file_hash}_{safe_name}"
 
     full_path = os.path.join(archive_path, archived_name)
     with open(full_path, "wb") as f:
         f.write(data)
-    logger.info(f"[Archive] File saved: {full_path} (category: {cat_dir})")
+    logger.info(f"[Archive] {cat_dir}/{archived_name} ({len(data)} bytes)")
     return full_path
+
+def smart_classify_by_content(filename: str, file_size: int, user_message: str = "") -> dict:
+    """智能推断文件类型，即使文件名没有关键词
+    返回: {"category": str, "is_single_doc": bool, "description": str}
+    """
+    category = classify_file(filename)
+    ext = get_file_ext(filename)
+    fmt = FORMAT_MAP.get(ext, ext.lstrip(".").upper() if ext else "未知")
+
+    # 文件名无关键词 → 通过上下文/用户消息辅助判断
+    if category == "other" and user_message:
+        user_lower = user_message.lower()
+        if any(k in user_lower for k in ["发票", "invoice"]):
+            category = "invoice"
+        elif any(k in user_lower for k in ["提单", "bill of lading"]):
+            category = "bill_of_lading"
+        elif any(k in user_lower for k in ["装箱单", "packing"]):
+            category = "packing_list"
+        elif any(k in user_lower for k in ["sgs", "质检", "inspection"]):
+            category = "quality_inspection"
+        elif any(k in user_lower for k in ["合同", "contract"]):
+            category = "contract"
+        elif any(k in user_lower for k in ["原产地", "产地证"]):
+            category = "certificate_of_origin"
+
+    # 判断是否是单证类型（需要审单）
+    is_single_doc = category in ("invoice", "bill_of_lading", "packing_list",
+                                  "certificate_of_origin", "quality_inspection")
+
+    description = f"文件：{filename} | 格式：{fmt} | 大小：{file_size/1024:.1f}KB | 推断类型：{CAT_DIR_NAMES.get(category, '未知')}"
+
+    return {"category": category, "is_single_doc": is_single_doc, "description": description}
 
 def download_wecom_media(media_id: str) -> bytes:
     """从企微下载媒体文件"""
@@ -385,58 +463,86 @@ def wecom_gateway():
                 threading.Thread(target=_async_reply, daemon=True).start()
                 return "success"
 
-            elif msg_type == "file":
-                # 群聊文件自动归档+审单
-                file_info = msg_json.get("file", {})
-                media_id = file_info.get("media_id", "")
-                file_title = file_info.get("title", "unknown")
-                file_size = file_info.get("file_size", 0)
+            elif msg_type in ("file", "image"):
+                # 群聊文件/图片自动归档+审单
+                if msg_type == "file":
+                    file_info = msg_json.get("file", {})
+                    media_id = file_info.get("media_id", "")
+                    file_title = file_info.get("title", "unknown")
+                    file_size = file_info.get("file_size", 0)
+                elif msg_type == "image":
+                    image_info = msg_json.get("image", {})
+                    media_id = image_info.get("media_id", "")
+                    file_title = "photo.jpg"  # 企微图片无文件名，默认 JPG
+                    file_size = 0
+                    category = "image"  # 图片默认归类
 
                 with _processing_lock:
                     if msg_id in _processing:
                         return "success"
                     _processing[msg_id] = {"done": threading.Event(), "reply": None}
 
-                logger.info(f"[Kit] File received: {file_title} ({file_size} bytes) from {user_id}")
+                logger.info(f"[Kit] {msg_type.upper()} received: {file_title} from {user_id}")
 
                 def _async_file_process():
                     try:
                         # 1. 下载文件
                         file_data = download_wecom_media(media_id)
-                        logger.info(f"[Kit] File downloaded: {file_title} ({len(file_data)} bytes)")
+                        logger.info(f"[Kit] Downloaded: {file_title} ({len(file_data)} bytes)")
 
-                        # 2. 归档
-                        saved_path = archive_file(file_data, file_title, user_id, msg_id)
+                        # 2. 智能分类（文件名+上下文+扩展名）
+                        if msg_type == "image":
+                            category = "image"
+                            info = {"category": "image", "is_single_doc": False, "description": f"图片：{file_title}"}
+                        else:
+                            info = smart_classify_by_content(file_title, len(file_data))
+                            category = info["category"]
 
-                        # 3. 判断是否触发审单
-                        category = classify_file(file_title)
-                        if category in ("invoice", "bill_of_lading", "packing_list", "quality_inspection"):
-                            # 自动交给 Docu-Checker 分析
+                        # 3. 归档
+                        saved_path = archive_file(file_data, file_title, user_id, msg_id, category)
+
+                        # 4. 根据类型决定回复策略
+                        if info["is_single_doc"]:
+                            # 单证类：自动交给 Docu-Checker
                             prompt = (
-                                f"客户在群里刚刚上传了文件：{file_title}（类型：{category}）\n"
-                                f"该文件已归档到 {saved_path}\n"
-                                f"请根据文件类型给出专业的审核建议。注意：你无法直接读取文件内容，"
-                                f"请告知业务员需要人工核对的关键字段，并列出该类型单证的常见风险点。"
+                                f"群里客户上传了文件：{file_title}\n"
+                                f"文件大小 {len(file_data)/1024:.0f} KB，格式 {get_file_ext(file_title)}\n"
+                                f"系统推断类型：{CAT_DIR_NAMES.get(category, '未知')}\n"
+                                f"文件已归档到 {saved_path}\n\n"
+                                f"你无法直接读取文件内容，但请根据单证类型给出：\n"
+                                f"1. 该类型单证必须核对的关键字段清单\n"
+                                f"2. 常见造假/错误风险点\n"
+                                f"3. 提醒业务员手动打开归档文件逐一核对"
                             )
                             ai_reply = process_message_via_agents(prompt, user_id)
-                        else:
-                            # 其他文件：确认归档
-                            cat_names = {
-                                "invoice": "发票", "bill_of_lading": "提单", "packing_list": "装箱单",
-                                "certificate_of_origin": "原产地证", "quality_inspection": "质检报告",
-                                "contract": "合同协议", "customs": "报关清关", "other": "其他"
-                            }
+                        elif category == "image":
+                            ai_reply = (
+                                f"📸 **图片已归档**\n"
+                                f"发件人：{user_id}\n"
+                                f"存档：{saved_path}\n"
+                                f"如需分析图片内容，请发送指令：「分析这张图片」"
+                            )
+                        elif category == "other":
+                            # 无法判断类型 → 让 AI 智能猜测
                             ai_reply = (
                                 f"📁 **文件已归档**\n"
                                 f"文件名：{file_title}\n"
-                                f"类型：{cat_names.get(category, '未知')}\n"
                                 f"发件人：{user_id}\n"
-                                f"存档路径：{saved_path}\n\n"
-                                f"如需审核此单证，请发送指令："审核此文件""
+                                f"存档：{saved_path}\n\n"
+                                f"系统未识别此文件类型。如需审核，请描述文件类型（如「这是发票」或「帮我审提单」），我会自动调对应智能体。"
+                            )
+                        else:
+                            ai_reply = (
+                                f"📁 **文件已归档**\n"
+                                f"文件名：{file_title}\n"
+                                f"类型：{CAT_DIR_NAMES.get(category, '未知')}\n"
+                                f"发件人：{user_id}\n"
+                                f"存档：{saved_path}\n\n"
+                                f"如需审核此单证，请发送指令：「审核此文件」"
                             )
 
                         send_reply_to_source(user_id, ai_reply, response_url)
-                        logger.info(f"[Kit] File processed and replied for {user_id}")
+                        logger.info(f"[Kit] {msg_type} processed: {category}")
                     except Exception as e:
                         logger.error(f"[Kit] File processing FAILED: {type(e).__name__}: {e}", exc_info=True)
                         try:
