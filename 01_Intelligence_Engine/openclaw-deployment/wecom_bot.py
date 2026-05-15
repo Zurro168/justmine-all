@@ -129,8 +129,8 @@ _processing_lock = threading.Lock()
 class WecomPushClient:
     """Send messages to users via WeCom Application Message API."""
     def __init__(self):
-        self.agent_id = os.getenv("WECOM_AGENT_ID", "")
-        self.app_secret = os.getenv("WECOM_APP_SECRET", "")
+        self.agent_id = os.getenv("WECHAT_AGENT_ID", "")
+        self.app_secret = os.getenv("WECHAT_SECRET", "")
         self.corp_id = os.getenv("WECHAT_CORP_ID", "")
         self._access_token = None
         self._token_expires_at = 0
