@@ -91,10 +91,13 @@ async def generate_daily_scout_report():
     all_data_text = "\n\n".join(summary_parts)
 
     ai_insight = ""
-    api_key = os.getenv("DEEPSEEK_API_KEY")
+    api_key = os.getenv("DASHSCOPE_API_KEY")
     if api_key:
         try:
-            headers = {"Authorization": f"Bearer {api_key}"}
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
             prompt = (
                 f"你是正矿供应链的 Scout（全球锆钛矿市场分析师），日期：{latest_date.strftime('%Y-%m-%d')}。\n\n"
                 f"今日行情数据：\n{all_data_text}\n\n"
@@ -108,14 +111,14 @@ async def generate_daily_scout_report():
                 f"5. 语言精炼专业，适合早间快报推送到企微群"
             )
             payload = {
-                "model": "deepseek-chat",
+                "model": "qwen-max",
                 "messages": [
                     {"role": "system", "content": "你是正矿供应链的首席锆钛市场分析师，擅长数据驱动的行情研判。"},
                     {"role": "user", "content": prompt}
                 ]
             }
             async with httpx.AsyncClient() as client:
-                resp = await client.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload, timeout=30.0)
+                resp = await client.post("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", headers=headers, json=payload, timeout=30.0)
                 ai_insight = resp.json()["choices"][0]["message"]["content"]
         except Exception as e:
             ai_insight = f"AI 分析暂时不可用：{str(e)}"
@@ -149,6 +152,44 @@ async def generate_daily_scout_report():
             print(f"[{datetime.now()}] Push exception: {e}")
     else:
         print(f"[{datetime.now()}] WECOM_WEBHOOK_URL not set or invalid.")
+
+    # 推送到 Notion Scout 数据库
+    notion_api_key = os.getenv("NOTION_API_KEY")
+    notion_db_id = os.getenv("NOTION_SCOUT_DATABASE_ID")
+    if notion_api_key and notion_db_id:
+        try:
+            # 提取 AI 研判内容（去掉前面的行情数据）
+            ai_only = ai_insight if ai_insight and not ai_insight.startswith("AI 分析") else "无"
+
+            payload = {
+                "parent": {"database_id": notion_db_id},
+                "properties": {
+                    "日期": {"date": {"start": latest_date.strftime("%Y-%m-%d")}},
+                    "行情数据": {"rich_text": [{"text": {"content": all_data_text}}]},
+                    "AI研判": {"rich_text": [{"text": {"content": ai_only}}]},
+                    "推送状态": {"select": {"name": "已推送" if wecom_webhook and wecom_webhook.startswith("http") else "未推送"}},
+                    "创建时间": {"date": {"start": datetime.now().isoformat()}},
+                }
+            }
+            async with httpx.AsyncClient() as client:
+                res = await client.post(
+                    "https://api.notion.com/v1/pages",
+                    headers={
+                        "Authorization": f"Bearer {notion_api_key}",
+                        "Notion-Version": "2022-06-28",
+                        "Content-Type": "application/json"
+                    },
+                    json=payload,
+                    timeout=15.0
+                )
+                if res.status_code == 200:
+                    print(f"[{datetime.now()}] Scout report archived to Notion.")
+                else:
+                    print(f"[{datetime.now()}] Notion archive failed: {res.status_code} - {res.text}")
+        except Exception as e:
+            print(f"[{datetime.now()}] Notion archive exception: {e}")
+    else:
+        print(f"[{datetime.now()}] NOTION_SCOUT_DATABASE_ID or NOTION_API_KEY not set.")
 
     return final_report
 
