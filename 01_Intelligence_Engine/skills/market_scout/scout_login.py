@@ -1,19 +1,17 @@
 """
-Session 登录态初始化脚本 — 在服务器上用 Playwright 打开浏览器
-等待人工登录铁合金在线，然后保存 session 供定时任务复用。
+Session 登录态初始化 — CDP 连接模式
+连接已运行的 Edge 实例（需手动先登录好），保存 session JSON。
 
-在 Windows 本地开发机上：
-  python scout_login.py
-  → 自动打开 Edge，手动登录后关闭浏览器即可
-
-在服务器（无 GUI）：
-  需要先用 Xvfb + vncserver 提供远程桌面，
-  或者直接在本地生成 session JSON 后复制到服务器。
+用法：
+1. 关闭所有 Edge
+2. 启动 Edge（调试模式）:
+   "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --remote-debugging-port=9222
+3. 在 Edge 中登录铁合金在线
+4. 运行此脚本保存 session
 """
 import asyncio
 import os
 import sys
-from pathlib import Path
 
 from playwright.async_api import async_playwright
 
@@ -22,61 +20,74 @@ if sys.platform == "win32":
 
 SESSION_DIR = os.path.join(os.path.dirname(__file__), "data")
 SESSION_FILE = os.path.join(SESSION_DIR, "ferroalloy_session.json")
-LOGIN_URL = "https://www.cnfeol.com/"
+Ferroalloy_URL = "https://www.cnfeol.com/gao/p_2528659.aspx"
 
 
-async def login_and_save_session():
-    """打开浏览器，等待人工登录，保存 session"""
+async def connect_and_save_session():
     os.makedirs(SESSION_DIR, exist_ok=True)
 
     print("=" * 60)
-    print("铁合金在线 登录态初始化")
-    print(f"Session 将保存到: {SESSION_FILE}")
+    print("铁合金在线 登录态初始化（CDP 连接模式）")
     print("=" * 60)
+    print("\n[1] 请先完成以下操作：")
+    print("    a. 关闭所有 Edge 窗口")
+    print('    b. 运行: "msedge.exe" --remote-debugging-port=9222')
+    print("    c. 在 Edge 中手动登录铁合金在线")
+    print("    d. 确保能正常打开 https://www.cnfeol.com/gao/p_2528659.aspx")
+    print()
+
+    input("    全部完成后，按 Enter 开始连接...")
 
     async with async_playwright() as p:
-        # 在 Windows 上用 Edge，在 Linux 上用 Chromium
-        launch_args = {"headless": False}
-        if sys.platform == "win32":
-            launch_args["channel"] = "msedge"
+        try:
+            print("\n[2] 连接 Edge（端口 9222）...")
+            browser = await p.chromium.connect_over_cdp(
+                "http://localhost:9222", timeout=15000
+            )
+        except Exception as e:
+            print(f"  ❌ 连接失败: {e}")
+            print("  请确认 Edge 已用 --remote-debugging-port=9222 启动")
+            return
+
+        # 复用已有 context（包含登录 cookie）
+        contexts = browser.contexts
+        if not contexts:
+            print("  ❌ 未找到活跃的浏览器上下文")
+            await browser.close()
+            return
+
+        context = contexts[0]
+        pages = context.pages
+        if not pages:
+            page = await context.new_page()
         else:
-            launch_args["executable_path"] = None
+            page = pages[0]
 
-        browser = await p.chromium.launch(**launch_args)
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 720},
-        )
-        page = await context.new_page()
+        # 验证登录态
+        print("\n[3] 验证会员页面访问...")
+        try:
+            await page.goto(Ferroalloy_URL, wait_until="domcontentloaded", timeout=15000)
+            await asyncio.sleep(2)
+            content = await page.content()
+            if "TencentCaptcha" in content:
+                print("  ⚠️  触发验证码，可能需要刷新或重新登录")
+            elif "价格" in content or "dataListTable" in content:
+                print("  ✅ 会员页面可正常访问")
+            else:
+                print("  ⚠️  页面内容异常，请检查浏览器窗口")
+        except Exception as e:
+            print(f"  ⚠️  验证请求异常: {e}")
 
-        # 防检测
-        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-
-        print(f"\n[1] 打开铁合金在线: {LOGIN_URL}")
-        await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
-
-        # 180 秒缓冲期 — 模拟人类浏览行为，降低反扒检测风险
-        print("\n[2] 180 秒缓冲期开始...")
-        print("    期间请手动登录铁合金在线账号（输入用户名、密码、验证码等）")
-        print("    此缓冲模拟正常浏览行为，避免触发反扒机制\n")
-        for i in range(180, 0, -30):
-            print(f"    ⏳ 剩余 {i} 秒")
-            await asyncio.sleep(30)
-        print("    ✅ 缓冲期结束")
-
-        print("\n[3] 请在浏览器中手动完成铁合金在线登录")
-        print("    登录成功后，在终端按 Enter 键保存 session")
-        input()  # 等待用户按 Enter
-
-        # 直接保存 session，不做额外跳转验证（避免触发额外验证码）
-        print("\n[4] 保存 session 到本地文件...")
+        # 保存 session
+        print("\n[4] 保存 session...")
         await context.storage_state(path=SESSION_FILE)
         print(f"\n✅ Session 已保存到: {SESSION_FILE}")
-        print("   定时任务将复用此 session，无需再次登录")
-        print("   Session 有效期约 7-30 天，过期后重新运行此脚本")
+        print("   文件大小:", os.path.getsize(SESSION_FILE), "bytes")
+        print("   定时任务将复用此 session")
+        print("   Session 有效期约 7-30 天，过期后重新运行")
 
         await browser.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(login_and_save_session())
+    asyncio.run(connect_and_save_session())
