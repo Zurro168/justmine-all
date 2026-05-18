@@ -238,7 +238,7 @@ def download_wecom_media(media_id: str) -> bytes:
 def create_notion_record(filename: str, category: str, sender: str, saved_path: str, file_size: int, description: str = "") -> bool:
     """在 Notion 数据库创建一条文件归档记录"""
     api_key = os.getenv("NOTION_API_KEY", "")
-    database_id = os.getenv("NOTION_DATABASE_ID", "")
+    database_id = os.getenv("NOTION_ARCHIVE_DATABASE_ID", os.getenv("NOTION_DATABASE_ID", ""))
     if not api_key or not database_id:
         logger.warning("Notion not configured, skipping archive record")
         return False
