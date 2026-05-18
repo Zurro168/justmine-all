@@ -55,8 +55,17 @@ async def login_and_save_session():
         print(f"\n[1] 打开铁合金在线: {LOGIN_URL}")
         await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
 
-        print("\n[2] 请在打开的浏览器中手动登录铁合金在线账号")
-        print("    登录成功后，在终端按 Enter 键保存 session")
+        # 180 秒缓冲期 — 模拟人类浏览行为，降低反扒检测风险
+        print("\n[2] 180 秒缓冲期开始...")
+        print("    期间请手动登录铁合金在线账号（输入用户名、密码、验证码等）")
+        print("    此缓冲模拟正常浏览行为，避免触发反扒机制\n")
+        for i in range(180, 0, -30):
+            print(f"    ⏳ 剩余 {i} 秒")
+            await asyncio.sleep(30)
+        print("    ✅ 缓冲期结束")
+
+        print("\n[3] 请确认已在浏览器中完成登录")
+        print("    如已登录成功，在终端按 Enter 键保存 session")
         input()  # 等待用户按 Enter
 
         # 跳转到会员页面验证登录
