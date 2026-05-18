@@ -9,21 +9,28 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from scout_collector import run_scout_collection
+from scout_playwright_collector import run_playwright_collection
 from scout_report_engine import generate_daily_scout_report, generate_monthly_summary_excel
 
 async def daily_task_flow():
     print(f"[{datetime.now()}] Starting scheduled Scout market data task...")
-    
-    # 1. Collect latest data
-    # We update back to 3 years just in case, but daily it's fast
-    success = await run_scout_collection(years=3)
-    
-    if success:
-        # 2. Generate Daily Report (Markdown + AI Insight)
+
+    # 1. 采集公开行情数据（httpx，无需登录）
+    print(f"[{datetime.now()}] [Step 1] Fetching public market indices via httpx...")
+    public_ok = await run_scout_collection(years=3)
+    print(f"[{datetime.now()}] [Step 1] Public data: {'OK' if public_ok else 'FAILED'}")
+
+    # 2. 采集会员专区数据（Playwright + session，需登录）
+    print(f"[{datetime.now()}] [Step 2] Fetching member data via Playwright...")
+    member_ok = await run_playwright_collection()
+    print(f"[{datetime.now()}] [Step 2] Member data: {'OK' if member_ok else 'SKIPPED (no session)'}")
+
+    # 3. 生成日报
+    if public_ok:
         md_report = await generate_daily_scout_report()
         print(f"[{datetime.now()}] Daily MD Report generated.")
-        
-        # 3. Generate Monthly Excel Summary
+
+        # 4. 生成月度 Excel 汇总
         excel_path = generate_monthly_summary_excel()
         print(f"[{datetime.now()}] Monthly Excel Summary generated at: {excel_path}")
     else:
@@ -31,24 +38,24 @@ async def daily_task_flow():
 
 async def main():
     # Load configuration
-    config_path = os.path.join(os.path.dirname(__file__), "scout_config.json")
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scout_config.json")
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
-    
+
     scheduler = AsyncIOScheduler()
-    
+
     # Schedule from config
     hour = config["schedule"].get("hour", 8)
     minute = config["schedule"].get("minute", 30)
     scheduler.add_job(daily_task_flow, 'cron', hour=hour, minute=minute)
-    
+
     # Run once immediately on startup for verification
     print("Initializing Scout Service...")
     await daily_task_flow()
-    
-    print("Scout Scheduler started. Running every day at 08:30 AM.")
+
+    print(f"Scout Scheduler started. Running every day at {hour:02d}:{minute:02d} AM.")
     scheduler.start()
-    
+
     # Keep the service running
     try:
         while True:
