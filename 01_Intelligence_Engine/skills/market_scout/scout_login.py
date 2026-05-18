@@ -64,22 +64,12 @@ async def login_and_save_session():
             await asyncio.sleep(30)
         print("    ✅ 缓冲期结束")
 
-        print("\n[3] 请确认已在浏览器中完成登录")
-        print("    如已登录成功，在终端按 Enter 键保存 session")
+        print("\n[3] 请在浏览器中手动完成铁合金在线登录")
+        print("    登录成功后，在终端按 Enter 键保存 session")
         input()  # 等待用户按 Enter
 
-        # 跳转到会员页面验证登录
-        print("\n[3] 验证登录态...")
-        await page.goto("https://www.cnfeol.com/gao/p_2528659.aspx", wait_until="domcontentloaded", timeout=30000)
-        await asyncio.sleep(2)
-
-        content = await page.content()
-        if "TencentCaptcha" in content or "登录" in content[:500]:
-            print("  ⚠️  检测到登录页面或验证码，可能未成功登录")
-            print("  请确认浏览器窗口中是否已登录，然后按 Enter 继续")
-            input()
-
-        # 保存 session
+        # 直接保存 session，不做额外跳转验证（避免触发额外验证码）
+        print("\n[4] 保存 session 到本地文件...")
         await context.storage_state(path=SESSION_FILE)
         print(f"\n✅ Session 已保存到: {SESSION_FILE}")
         print("   定时任务将复用此 session，无需再次登录")
