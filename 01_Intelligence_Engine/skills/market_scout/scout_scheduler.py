@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 import os
 import sys
+import traceback
 
 # Add current dir to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -16,25 +17,48 @@ async def daily_task_flow():
     print(f"[{datetime.now()}] Starting scheduled Scout market data task...")
 
     # 1. 采集公开行情数据（httpx，无需登录）
-    print(f"[{datetime.now()}] [Step 1] Fetching public market indices via httpx...")
-    public_ok = await run_scout_collection(years=3)
-    print(f"[{datetime.now()}] [Step 1] Public data: {'OK' if public_ok else 'FAILED'}")
+    public_ok = False
+    try:
+        print(f"[{datetime.now()}] [Step 1] Fetching public market indices via httpx...")
+        public_ok = await run_scout_collection(years=3)
+        print(f"[{datetime.now()}] [Step 1] Public data: {'OK' if public_ok else 'FAILED'}")
+    except Exception as e:
+        print(f"[{datetime.now()}] [Step 1] ERROR: {e}")
+        traceback.print_exc()
 
     # 2. 采集会员专区数据（Playwright + session，需登录）
-    print(f"[{datetime.now()}] [Step 2] Fetching member data via Playwright...")
-    member_ok = await run_playwright_collection()
-    print(f"[{datetime.now()}] [Step 2] Member data: {'OK' if member_ok else 'SKIPPED (no session)'}")
+    member_ok = False
+    try:
+        print(f"[{datetime.now()}] [Step 2] Fetching member data via Playwright...")
+        member_ok = await run_playwright_collection()
+        print(f"[{datetime.now()}] [Step 2] Member data: {'OK' if member_ok else 'SKIPPED (no session)'}")
+    except Exception as e:
+        print(f"[{datetime.now()}] [Step 2] ERROR: {e}")
+        traceback.print_exc()
+        # Don't crash — continue to report generation
 
-    # 3. 生成日报
+    # 3. 生成日报（只要有公开数据就生成）
     if public_ok:
-        md_report = await generate_daily_scout_report()
-        print(f"[{datetime.now()}] Daily MD Report generated.")
+        try:
+            print(f"[{datetime.now()}] [Step 3] Generating daily report...")
+            md_report = await generate_daily_scout_report()
+            print(f"[{datetime.now()}] [Step 3] Daily MD Report generated.")
+        except Exception as e:
+            print(f"[{datetime.now()}] [Step 3] ERROR: {e}")
+            traceback.print_exc()
 
         # 4. 生成月度 Excel 汇总
-        excel_path = generate_monthly_summary_excel()
-        print(f"[{datetime.now()}] Monthly Excel Summary generated at: {excel_path}")
+        try:
+            excel_path = generate_monthly_summary_excel()
+            print(f"[{datetime.now()}] [Step 4] Monthly Excel Summary generated at: {excel_path}")
+        except Exception as e:
+            print(f"[{datetime.now()}] [Step 4] ERROR: {e}")
+            traceback.print_exc()
     else:
         print(f"[{datetime.now()}] Collection failed, skipping reports.")
+
+    print(f"[{datetime.now()}] Daily task flow complete.")
+
 
 async def main():
     # Load configuration
@@ -62,6 +86,7 @@ async def main():
             await asyncio.sleep(3600)
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
