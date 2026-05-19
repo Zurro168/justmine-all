@@ -1,6 +1,10 @@
-﻿node_modules/
+node_modules/
 dist/
 .env
 .env.*
 __pycache__/
 *.log
+
+# Sensitive data — never commit to git
+**/ferroalloy_session.json
+01_Intelligence_Engine/skills/market_scout/data/
