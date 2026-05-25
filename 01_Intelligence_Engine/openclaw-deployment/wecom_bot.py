@@ -83,6 +83,16 @@ factory = OpenClawAgentFactory(
     config_path=os.path.join(os.path.dirname(__file__), "..", "bots", "openclaw_prompts_v2.json")
 )
 
+# 引入 Audit-Pro
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "skills", "audit_pro"))
+try:
+    from audit_pro import AuditProService
+    audit_service = AuditProService()
+except Exception as e:
+    logger.error(f"Failed to load AuditProService: {e}")
+    audit_service = None
+
+
 # === 文件归档系统 ===
 ARCHIVE_ROOT = os.path.join(os.path.dirname(__file__), "archive")
 os.makedirs(ARCHIVE_ROOT, exist_ok=True)
@@ -292,6 +302,72 @@ def process_message_via_agents(user_message: str, user_id: str) -> str:
     })
     logger.info(f"[Pipeline] Step 3: Reply generated ({len(reply)} chars)")
     return reply
+
+def call_vision_ocr(file_path: str, doc_type: str) -> dict:
+    """调用 qwen-vl-max 提取图片上的单证字段"""
+    api_key = os.getenv("DASHSCOPE_API_KEY")
+    if not api_key:
+        logger.error("DASHSCOPE_API_KEY not configured")
+        return {}
+    
+    ext = get_file_ext(file_path)
+    if ext not in [".jpg", ".jpeg", ".png", ".bmp"]:
+        logger.warning(f"File {file_path} is not an image, cannot OCR with qwen-vl")
+        return {}
+        
+    try:
+        with open(file_path, "rb") as f:
+            base64_img = base64.b64encode(f.read()).decode("utf-8")
+            
+        mime = "image/jpeg"
+        if ext == ".png": mime = "image/png"
+        
+        prompt = (
+            f"你是一个智能审单专家。这是一份类型为 {doc_type} 的单据图片。\n"
+            f"请仔细提取以下关键字段的值（如果没有找到，请将其值设为 null）：\n"
+            f"- type (固定为 {doc_type.upper()})\n"
+            f"- net_weight (提取净重数值)\n"
+            f"- unit_price (提取单价)\n"
+            f"- total_amount (提取总金额)\n"
+            f"- latest_shipment_date (提取最晚装运期，格式 YYYY-MM-DD)\n"
+            f"仅输出 JSON 格式，不要包含任何 markdown 标记或其他解释文本。"
+        )
+        
+        payload = {
+            "model": "qwen-vl-max",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{base64_img}"}}
+                    ]
+                }
+            ]
+        }
+        
+        resp = requests.post(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json=payload,
+            timeout=45
+        )
+        
+        if resp.status_code == 200:
+            content = resp.json()["choices"][0]["message"]["content"]
+            clean_json = content.replace("```json", "").replace("```", "").strip()
+            return json.loads(clean_json)
+        else:
+            logger.error(f"OCR Failed: {resp.text}")
+            return {}
+            
+    except Exception as e:
+        logger.error(f"OCR Exception: {e}")
+        return {}
+
 
 def ask_deepseek(question):
     api_key = os.getenv("DEEPSEEK_API_KEY")
@@ -552,17 +628,48 @@ def wecom_gateway():
                         # 5. 根据类型决定回复策略
                         if info["is_single_doc"]:
                             # 单证类：自动交给 Docu-Checker
-                            prompt = (
-                                f"群里客户上传了文件：{file_title}\n"
-                                f"文件大小 {len(file_data)/1024:.0f} KB，格式 {get_file_ext(file_title)}\n"
-                                f"系统推断类型：{CAT_DIR_NAMES.get(category, '未知')}\n"
-                                f"文件已归档到 {saved_path}\n\n"
-                                f"你无法直接读取文件内容，但请根据单证类型给出：\n"
-                                f"1. 该类型单证必须核对的关键字段清单\n"
-                                f"2. 常见造假/错误风险点\n"
-                                f"3. 提醒业务员手动打开归档文件逐一核对"
-                            )
-                            ai_reply = process_message_via_agents(prompt, user_id)
+                            ext = get_file_ext(saved_path)
+                            if ext in [".jpg", ".jpeg", ".png", ".bmp"]:
+                                send_reply_to_source(user_id, f"🔍 正在启动【Docu-Checker 视觉中枢】读取 {file_title} 的内容...", response_url)
+                                
+                                ocr_data = call_vision_ocr(saved_path, category)
+                                
+                                if ocr_data and audit_service:
+                                    import asyncio
+                                    audit_result = asyncio.run(audit_service.run_full_audit([ocr_data]))
+                                    
+                                    if audit_result["overall_status"] == "SUCCESS":
+                                        ai_reply = (
+                                            f"✅ **Docu-Checker 视觉审核通过**\n"
+                                            f"文件：{file_title}\n"
+                                            f"提取数据：净重 {ocr_data.get('net_weight')} | 单价 {ocr_data.get('unit_price')}\n"
+                                            f"核对结果：未发现逻辑矛盾或风险点。"
+                                        )
+                                    else:
+                                        findings_str = "\n".join([f"- {f['module']}: {f['finding']}" for f in audit_result["findings"]])
+                                        ai_reply = (
+                                            f"🚨 **Docu-Checker 发现单据不符点！**\n"
+                                            f"文件：{file_title}\n"
+                                            f"风险分数：{audit_result['risk_score']}\n"
+                                            f"提取数据：净重 {ocr_data.get('net_weight')} | 单价 {ocr_data.get('unit_price')} | 总价 {ocr_data.get('total_amount')}\n"
+                                            f"**发现问题：**\n{findings_str}\n\n"
+                                            f"👉 建议尽快核实存档文件：{saved_path}"
+                                        )
+                                else:
+                                    ai_reply = f"⚠️ 视觉 OCR 提取失败或审核模块出错，请人工核实文件：{saved_path}"
+                            else:
+                                # 非图片文件，退回文字 Checklist 策略
+                                prompt = (
+                                    f"群里客户上传了文件：{file_title}\n"
+                                    f"文件大小 {len(file_data)/1024:.0f} KB，格式 {ext}\n"
+                                    f"系统推断类型：{CAT_DIR_NAMES.get(category, '未知')}\n"
+                                    f"文件已归档到 {saved_path}\n\n"
+                                    f"目前视觉中枢仅支持图片识别，请针对该类单证给出：\n"
+                                    f"1. 必须核对的关键字段清单\n"
+                                    f"2. 常见造假/错误风险点\n"
+                                    f"3. 提醒业务员手动打开文件逐一核对"
+                                )
+                                ai_reply = process_message_via_agents(prompt, user_id)
                         elif category == "image":
                             ai_reply = (
                                 f"📸 **图片已归档**\n"

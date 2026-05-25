@@ -91,7 +91,13 @@ async def generate_daily_scout_report():
     all_data_text = "\n\n".join(summary_parts)
 
     ai_insight = ""
-    api_key = os.getenv("DASHSCOPE_API_KEY")
+    
+    # Load env vars
+    from dotenv import load_dotenv
+    env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../03_Operations_Hub/.env.justmine"))
+    load_dotenv(env_path)
+    
+    api_key = os.getenv("DEEPSEEK_API_KEY")
     if api_key:
         try:
             headers = {
@@ -111,25 +117,33 @@ async def generate_daily_scout_report():
                 f"5. 语言精炼专业，适合早间快报推送到企微群"
             )
             payload = {
-                "model": "qwen-max",
+                "model": "deepseek-chat",
                 "messages": [
                     {"role": "system", "content": "你是正矿供应链的首席锆钛市场分析师，擅长数据驱动的行情研判。"},
                     {"role": "user", "content": prompt}
                 ]
             }
             async with httpx.AsyncClient() as client:
-                resp = await client.post("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions", headers=headers, json=payload, timeout=30.0)
+                resp = await client.post("https://api.deepseek.com/chat/completions", headers=headers, json=payload, timeout=60.0)
+                resp.raise_for_status()
                 ai_insight = resp.json()["choices"][0]["message"]["content"]
         except Exception as e:
             ai_insight = f"AI 分析暂时不可用：{str(e)}"
 
+
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    data_date_str = latest_date.strftime('%Y-%m-%d')
+    
+    # If the latest data date is different from today (e.g. weekend or holiday), show both
+    date_header = today_str if today_str == data_date_str else f"{today_str} (数据截至 {data_date_str})"
+
     final_report = (
-        f"# 正矿供应链 · 锆钛行情日报 ({latest_date.strftime('%Y-%m-%d')})\n\n"
+        f"# 正矿供应链 · 锆钛行情日报 ({date_header})\n\n"
         f"## 上游矿产\n" + "\n".join(ore_lines) + "\n\n"
         f"## 下游产品\n" + "\n".join(down_lines) + "\n\n"
         f"## 国际海运\n" + "\n".join(ship_lines) + "\n\n"
         f"## AI 综合研判\n{ai_insight}\n\n"
-        f"--- \n*由 Scout 自动引擎生成于 {datetime.now().strftime('%H:%M:%S')}*"
+        f"--- \n*由 Scout 自动引擎生成于 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*"
     )
 
     report_path = os.path.join(REPORTS_DIR, f"scout_daily_{latest_date.strftime('%Y%m%d')}.md")
@@ -140,7 +154,10 @@ async def generate_daily_scout_report():
     wecom_webhook = os.getenv("WECOM_WEBHOOK_URL")
     if wecom_webhook and wecom_webhook.startswith("http"):
         try:
-            wecom_headers = {"Content-Type": "application/json"}
+            wecom_headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            }
             payload = {"msgtype": "markdown", "markdown": {"content": final_report}}
             async with httpx.AsyncClient() as client:
                 res = await client.post(wecom_webhook, headers=wecom_headers, json=payload, timeout=10.0)
@@ -164,9 +181,10 @@ async def generate_daily_scout_report():
             payload = {
                 "parent": {"database_id": notion_db_id},
                 "properties": {
+                    "Scout": {"title": [{"text": {"content": f"Scout 早报 - {latest_date.strftime('%Y-%m-%d')}"}}]},
                     "日期": {"date": {"start": latest_date.strftime("%Y-%m-%d")}},
-                    "行情数据": {"rich_text": [{"text": {"content": all_data_text}}]},
-                    "AI研判": {"rich_text": [{"text": {"content": ai_only}}]},
+                    "行情数据": {"rich_text": [{"text": {"content": all_data_text[:2000]}}]},
+                    "AI行情研判": {"rich_text": [{"text": {"content": ai_only[:2000]}}]},
                     "推送状态": {"select": {"name": "已推送" if wecom_webhook and wecom_webhook.startswith("http") else "未推送"}},
                     "创建时间": {"date": {"start": datetime.now().isoformat()}},
                 }

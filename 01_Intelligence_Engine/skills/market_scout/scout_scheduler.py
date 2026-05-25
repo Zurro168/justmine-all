@@ -66,18 +66,22 @@ async def main():
     with open(config_path, "r", encoding="utf-8") as f:
         config = json.load(f)
 
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone='Asia/Shanghai')
 
     # Schedule from config
     hour = config["schedule"].get("hour", 8)
     minute = config["schedule"].get("minute", 30)
     scheduler.add_job(daily_task_flow, 'cron', hour=hour, minute=minute)
 
-    # Run once immediately on startup for verification
-    print("Initializing Scout Service...")
-    await daily_task_flow()
+    # Run once immediately on startup only if configured
+    run_on_startup = os.getenv("RUN_SCOUT_ON_STARTUP", "false").lower() == "true"
+    if run_on_startup:
+        print("Initializing Scout Service (Immediate Run)...")
+        await daily_task_flow()
+    else:
+        print("Initializing Scout Service (Waiting for scheduled run)...")
 
-    print(f"Scout Scheduler started. Running every day at {hour:02d}:{minute:02d} AM.")
+    print(f"Scout Scheduler started. Running every day at {hour:02d}:{minute:02d} AM Beijing Time.")
     scheduler.start()
 
     # Keep the service running
