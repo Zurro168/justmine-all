@@ -1,7 +1,7 @@
 import pandas as pd
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import httpx
 import sys
 
@@ -186,7 +186,7 @@ async def generate_daily_scout_report():
                     "行情数据": {"rich_text": [{"text": {"content": all_data_text[:2000]}}]},
                     "AI行情研判": {"rich_text": [{"text": {"content": ai_only[:2000]}}]},
                     "推送状态": {"select": {"name": "已推送" if wecom_webhook and wecom_webhook.startswith("http") else "未推送"}},
-                    "创建时间": {"date": {"start": datetime.now().isoformat()}},
+                    "创建时间": {"date": {"start": datetime.now(timezone.utc).isoformat()}},
                 }
             }
             async with httpx.AsyncClient() as client:
