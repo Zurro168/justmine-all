@@ -12,9 +12,20 @@
 const fs = require('fs');
 const path = require('path');
 
-// ─── CONFIG ──────────────────────────────────────────────────────────────────
-const VAULT_PATH = 'D:\\iCloudDrive\\iCloud~md~obsidian\\Obsidian Vault\\正矿网站知识库';
+let VAULT_PATH = 'D:\\iCloudDrive\\iCloud~md~obsidian\\Obsidian Vault\\正矿网站知识库';
 const OUTPUT_FILE = path.join(__dirname, '..', 'src', 'data', 'kb-articles.json');
+
+// Auto-translate Windows drive path to WSL mount path if running in WSL/Linux
+if (process.platform === 'linux' && !fs.existsSync(VAULT_PATH)) {
+  if (/^[a-zA-Z]:[/\\]/.test(VAULT_PATH)) {
+    const drive = VAULT_PATH[0].toLowerCase();
+    const rest = VAULT_PATH.slice(3).replace(/\\/g, '/');
+    const wslPath = `/mnt/${drive}/${rest}`;
+    if (fs.existsSync(wslPath)) {
+      VAULT_PATH = wslPath;
+    }
+  }
+}
 
 // Map vault subfolder names → category IDs used in the website
 const FOLDER_TO_CATEGORY = {
