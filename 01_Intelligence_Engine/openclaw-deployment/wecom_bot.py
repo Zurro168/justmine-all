@@ -84,9 +84,9 @@ factory = OpenClawAgentFactory(
 )
 
 # 引入 Audit-Pro
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "skills", "audit_pro"))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "skills"))
 try:
-    from audit_pro import AuditProService
+    from audit_pro.audit_pro import AuditProService
     audit_service = AuditProService()
 except Exception as e:
     logger.error(f"Failed to load AuditProService: {e}")

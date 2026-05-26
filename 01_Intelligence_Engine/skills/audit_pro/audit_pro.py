@@ -47,6 +47,22 @@ class AuditProService:
                 results["overall_status"] = "DISCREPANCY_DETECTED"
                 results["risk_score"] += 40
 
+        # 2.1 单发票自身金额计算验证 (Invoice Self-Check)
+        if inv and inv.get('net_weight') is not None and inv.get('unit_price') is not None and inv.get('total_amount') is not None:
+            try:
+                calc_total = float(inv.get('net_weight', 0)) * float(inv.get('unit_price', 0))
+                inv_total = float(inv.get('total_amount', 0))
+                if abs(calc_total - inv_total) > 1.0:
+                    results["findings"].append({
+                        "module": "INVOICE_SELF_CHECK",
+                        "finding": f"发票金额验证不符！计算值(净重*单价) = {calc_total:.2f} vs 发票标明总额 = {inv_total:.2f}",
+                        "severity": "CRITICAL"
+                    })
+                    results["overall_status"] = "DISCREPANCY_DETECTED"
+                    results["risk_score"] += 40
+            except Exception as e:
+                logger.error(f"Invoice self check failed: {e}")
+
         # 3. 核心逻辑 B：信用证时效审计 (L/C Compliance)
         if lc:
             lc_finding = self._check_lc_compliance(lc, current_date)
