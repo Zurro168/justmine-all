@@ -886,7 +886,104 @@ def wecom_gateway():
                 content = msg_root.find("Content").text
                 logger.info(f"Received msg from {user_id}: {content}")
 
-                ai_reply = process_message_via_agents(content, user_id)
+                content_clean = content.strip()
+                if content_clean in ["清空", "重置", "重新审核"]:
+                    if user_id in USER_DOCUMENT_SESSIONS:
+                        USER_DOCUMENT_SESSIONS[user_id] = {}
+                    ai_reply = "🧹 已为您清空当前的审单文档缓存，可以开始上传新的单证进行审核。"
+                else:
+                    # Check for manual category override
+                    matched_category = None
+                    category_name_cn = ""
+                    if any(kw in content_clean for kw in ["这是提单", "设为提单", "改为提单", "为提单"]):
+                        matched_category = "bill_of_lading"
+                        category_name_cn = "提单"
+                    elif any(kw in content_clean for kw in ["这是发票", "设为发票", "改为发票", "为发票"]):
+                        matched_category = "invoice"
+                        category_name_cn = "发票"
+                    elif any(kw in content_clean for kw in ["这是装箱单", "设为装箱单", "改为装箱单", "为装箱单"]):
+                        matched_category = "packing_list"
+                        category_name_cn = "装箱单"
+
+                    if matched_category:
+                        last_file_info = USER_LAST_FILE.get(user_id)
+                        if not last_file_info:
+                            ai_reply = "⚠️ 未找到您最近上传的文件，请先发送文件/图片。"
+                        else:
+                            saved_path = last_file_info["path"]
+                            file_title = last_file_info["filename"]
+                            
+                            ai_reply = f"🔍 已收到指令，正在将 {file_title} 重新识别为【{category_name_cn}】并运行审核..."
+                            
+                            def _async_manual_process_xml():
+                                try:
+                                    ext = get_file_ext(saved_path)
+                                    if ext in [".jpg", ".jpeg", ".png", ".bmp"]:
+                                        ocr_data = call_vision_ocr(saved_path, matched_category)
+                                        if ocr_data and audit_service:
+                                            if user_id not in USER_DOCUMENT_SESSIONS:
+                                                USER_DOCUMENT_SESSIONS[user_id] = {}
+                                            
+                                            doc_type_key = ocr_data.get('type') or matched_category.upper()
+                                            ocr_data['type'] = doc_type_key
+                                            USER_DOCUMENT_SESSIONS[user_id][doc_type_key] = ocr_data
+                                            
+                                            import asyncio
+                                            audit_result = asyncio.run(audit_service.run_full_audit(list(USER_DOCUMENT_SESSIONS[user_id].values())))
+                                            
+                                            session_docs = USER_DOCUMENT_SESSIONS[user_id]
+                                            doc_types_str = ", ".join([k for k in session_docs.keys()])
+                                            
+                                            extracted_summary = []
+                                            for dtype, ddata in session_docs.items():
+                                                parts = []
+                                                if ddata.get('net_weight') is not None: parts.append(f"净重: {ddata.get('net_weight')}")
+                                                if ddata.get('unit_price') is not None: parts.append(f"单价: {ddata.get('unit_price')}")
+                                                if ddata.get('total_amount') is not None: parts.append(f"总金额: {ddata.get('total_amount')}")
+                                                if ddata.get('container_no') is not None: parts.append(f"箱号: {ddata.get('container_no')}")
+                                                if ddata.get('seal_no') is not None: parts.append(f"封条号: {ddata.get('seal_no')}")
+                                                if ddata.get('shipper_name') is not None: parts.append(f"发货人: {ddata.get('shipper_name')}")
+                                                if ddata.get('shipper_address') is not None: parts.append(f"发货人地址: {ddata.get('shipper_address')}")
+                                                if ddata.get('consignee_name') is not None: parts.append(f"收货人: {ddata.get('consignee_name')}")
+                                                if ddata.get('consignee_address') is not None: parts.append(f"收货人地址: {ddata.get('consignee_address')}")
+                                                extracted_summary.append(f"📍 **{dtype}**:\n  - " + "\n  - ".join(parts))
+                                            
+                                            extracted_summary_str = "\n".join(extracted_summary)
+
+                                            if audit_result.get("findings"):
+                                                findings_str = "\n".join([f"- {f['finding']}" for f in audit_result["findings"]])
+                                            else:
+                                                findings_str = "- 未发现任何不符点或需要核对的内容。"
+
+                                            if audit_result["overall_status"] in ("DISCREPANCY_DETECTED", "WARNING"):
+                                                status_icon = "🚨"
+                                                status_title = "发现单据不符点/风险项"
+                                            else:
+                                                status_icon = "✅"
+                                                status_title = "审核核对完毕"
+
+                                            push_reply = (
+                                                f"{status_icon} **Docu-Checker 智能审核结果 ({status_title})**\n"
+                                                f"当前接收文件：{file_title} ({matched_category.upper()})\n"
+                                                f"当前缓存池单证：{doc_types_str}\n\n"
+                                                f"📋 **提取单证关键信息：**\n{extracted_summary_str}\n\n"
+                                                f"🔍 **比对与核对结果：**\n{findings_str}\n\n"
+                                                f"👉 建议核实存档文件路径：{saved_path}\n"
+                                                f"💡 提示：如需重新开始审核，可发送指令“清空”或“重置”清空缓存池。"
+                                            )
+                                        else:
+                                            push_reply = f"⚠️ 视觉 OCR 提取失败或审核模块出错，请人工核实文件：{saved_path}"
+                                    else:
+                                        push_reply = f"⚠️ 该文件不是图片格式，无法进行视觉识别：{saved_path}"
+                                    
+                                    send_reply_to_source(user_id, push_reply, "")
+                                except Exception as e:
+                                    logger.error(f"[XML-App] Manual manual process XML failed: {e}", exc_info=True)
+                                    send_reply_to_source(user_id, f"⚠️ 修正处理失败：{str(e)}", "")
+
+                            threading.Thread(target=_async_manual_process_xml, daemon=True).start()
+                    else:
+                        ai_reply = process_message_via_agents(content, user_id)
 
                 reply_tpl = """<xml>
                     <ToUserName><![CDATA[{to}]]></ToUserName>
@@ -910,6 +1007,174 @@ def wecom_gateway():
                     return jsonify({"encrypt": encrypt_val})
                 else:
                     return encrypted_reply
+            
+            elif msg_type in ("file", "image"):
+                msg_id = msg_root.find("MsgId").text if msg_root.find("MsgId") is not None else str(int(time.time() * 1000))
+                
+                if msg_type == "file":
+                    media_id_node = msg_root.find(".//MediaId")
+                    file_title_node = msg_root.find(".//FileName") or msg_root.find(".//Title")
+                    file_size_node = msg_root.find(".//FileSize")
+                    
+                    media_id = media_id_node.text if media_id_node is not None else ""
+                    file_title = file_title_node.text if file_title_node is not None else "unknown"
+                    file_size = int(file_size_node.text) if file_size_node is not None else 0
+                elif msg_type == "image":
+                    media_id_node = msg_root.find(".//MediaId")
+                    media_id = media_id_node.text if media_id_node is not None else ""
+                    file_title = "photo.jpg"
+                    file_size = 0
+                    category = "image"
+
+                with _processing_lock:
+                    if msg_id in _processing:
+                        return "success"
+                    _processing[msg_id] = {"done": threading.Event(), "reply": None}
+
+                logger.info(f"[XML-App] {msg_type.upper()} received: {file_title} from {user_id}")
+
+                def _async_file_process_xml():
+                    try:
+                        # 1. 下载文件
+                        file_data = download_wecom_media(media_id)
+                        logger.info(f"[XML-App] Downloaded: {file_title} ({len(file_data)} bytes)")
+
+                        # 2. 智能分类
+                        if msg_type == "image":
+                            category = "image"
+                            info = {"category": "image", "is_single_doc": False, "description": f"图片：{file_title}"}
+                        else:
+                            info = smart_classify_by_content(file_title, len(file_data))
+                            category = info["category"]
+
+                        # 3. 归档
+                        saved_path = archive_file(file_data, file_title, user_id, msg_id, category)
+
+                        # 记录最近上传的文件
+                        USER_LAST_FILE[user_id] = {
+                            "path": saved_path,
+                            "filename": file_title,
+                            "size": len(file_data)
+                        }
+
+                        # 4. 写入 Notion 归档记录
+                        create_notion_record(file_title, category, user_id, saved_path, len(file_data), info["description"])
+
+                        # 5. 根据类型决定回复策略
+                        if info["is_single_doc"]:
+                            ext = get_file_ext(saved_path)
+                            if ext in [".jpg", ".jpeg", ".png", ".bmp"]:
+                                send_reply_to_source(user_id, f"🔍 正在启动【Docu-Checker 视觉中枢】读取 {file_title} 的内容...", "")
+                                
+                                ocr_data = call_vision_ocr(saved_path, category)
+                                
+                                if ocr_data and audit_service:
+                                    if user_id not in USER_DOCUMENT_SESSIONS:
+                                        USER_DOCUMENT_SESSIONS[user_id] = {}
+                                    
+                                    doc_type_key = ocr_data.get('type') or category.upper()
+                                    ocr_data['type'] = doc_type_key
+                                    USER_DOCUMENT_SESSIONS[user_id][doc_type_key] = ocr_data
+                                    
+                                    import asyncio
+                                    audit_result = asyncio.run(audit_service.run_full_audit(list(USER_DOCUMENT_SESSIONS[user_id].values())))
+                                    
+                                    session_docs = USER_DOCUMENT_SESSIONS[user_id]
+                                    doc_types_str = ", ".join([k for k in session_docs.keys()])
+                                    
+                                    extracted_summary = []
+                                    for dtype, ddata in session_docs.items():
+                                        parts = []
+                                        if ddata.get('net_weight') is not None: parts.append(f"净重: {ddata.get('net_weight')}")
+                                        if ddata.get('unit_price') is not None: parts.append(f"单价: {ddata.get('unit_price')}")
+                                        if ddata.get('total_amount') is not None: parts.append(f"总金额: {ddata.get('total_amount')}")
+                                        if ddata.get('container_no') is not None: parts.append(f"箱号: {ddata.get('container_no')}")
+                                        if ddata.get('seal_no') is not None: parts.append(f"封条号: {ddata.get('seal_no')}")
+                                        if ddata.get('shipper_name') is not None: parts.append(f"发货人: {ddata.get('shipper_name')}")
+                                        if ddata.get('shipper_address') is not None: parts.append(f"发货人地址: {ddata.get('shipper_address')}")
+                                        if ddata.get('consignee_name') is not None: parts.append(f"收货人: {ddata.get('consignee_name')}")
+                                        if ddata.get('consignee_address') is not None: parts.append(f"收货人地址: {ddata.get('consignee_address')}")
+                                        extracted_summary.append(f"📍 **{dtype}**:\n  - " + "\n  - ".join(parts))
+                                    
+                                    extracted_summary_str = "\n".join(extracted_summary)
+
+                                    if audit_result.get("findings"):
+                                        findings_str = "\n".join([f"- {f['finding']}" for f in audit_result["findings"]])
+                                    else:
+                                        findings_str = "- 未发现任何不符点或需要核对的内容。"
+
+                                    if audit_result["overall_status"] in ("DISCREPANCY_DETECTED", "WARNING"):
+                                        status_icon = "🚨"
+                                        status_title = "发现单据不符点/风险项"
+                                    else:
+                                        status_icon = "✅"
+                                        status_title = "审核核对完毕"
+
+                                    ai_reply = (
+                                        f"{status_icon} **Docu-Checker 智能审核结果 ({status_title})**\n"
+                                        f"当前接收文件：{file_title} ({category.upper()})\n"
+                                        f"当前缓存池单证：{doc_types_str}\n\n"
+                                        f"📋 **提取单证关键信息：**\n{extracted_summary_str}\n\n"
+                                        f"🔍 **比对与核对结果：**\n{findings_str}\n\n"
+                                        f"👉 建议核实存档文件路径：{saved_path}\n"
+                                        f"💡 提示：如需重新开始审核，可发送指令“清空”或“重置”清空缓存池。"
+                                    )
+                                else:
+                                    ai_reply = f"⚠️ 视觉 OCR 提取失败或审核模块出错，请人工核实文件：{saved_path}"
+                            else:
+                                prompt = (
+                                    f"用户上传了文件：{file_title}\n"
+                                    f"文件大小 {len(file_data)/1024:.0f} KB，格式 {ext}\n"
+                                    f"系统推断类型：{CAT_DIR_NAMES.get(category, '未知')}\n"
+                                    f"文件已归档到 {saved_path}\n\n"
+                                    f"目前视觉中枢仅支持图片识别，请针对该类单证给出：\n"
+                                    f"1. 必须核对的关键字段清单\n"
+                                    f"2. 常见造假/错误风险点\n"
+                                    f"3. 提醒业务员手动打开文件逐一核对"
+                                )
+                                ai_reply = process_message_via_agents(prompt, user_id)
+                        elif category == "image":
+                            ai_reply = (
+                                f"📸 **图片已归档**\n"
+                                f"发件人：{user_id}\n"
+                                f"存档：{saved_path}\n"
+                                f"如需分析图片内容，请发送指令：「分析这张图片」"
+                            )
+                        elif category == "other":
+                            ai_reply = (
+                                f"📁 **文件已归档**\n"
+                                f"文件名：{file_title}\n"
+                                f"发件人：{user_id}\n"
+                                f"存档：{saved_path}\n\n"
+                                f"系统未识别此文件类型。如需审核，请描述文件类型（如「这是发票」或「帮我审提单」），我会自动调对应智能体。"
+                            )
+                        else:
+                            ai_reply = (
+                                f"📁 **文件已归档**\n"
+                                f"文件名：{file_title}\n"
+                                f"类型：{CAT_DIR_NAMES.get(category, '未知')}\n"
+                                f"发件人：{user_id}\n"
+                                f"存档：{saved_path}\n\n"
+                                f"如需审核此单证，请发送指令：「审核此文件」"
+                            )
+                        
+                        send_reply_to_source(user_id, ai_reply, "")
+                        logger.info(f"[XML-App] {msg_type} processed: {category}")
+                    except Exception as e:
+                        logger.error(f"[XML-App] File processing FAILED: {e}", exc_info=True)
+                        try:
+                            send_reply_to_source(user_id, f"⚠️ 文件处理失败：{str(e)[:100]}", "")
+                        except Exception:
+                            pass
+                    finally:
+                        with _processing_lock:
+                            _processing[msg_id]["done"].set()
+                            stale = [k for k, v in _processing.items() if v["done"].is_set()]
+                            for k in stale[:50]:
+                                del _processing[k]
+
+                threading.Thread(target=_async_file_process_xml, daemon=True).start()
+                return "success"
             
     except Exception as e:
         logger.error(f"Post error: {str(e)}")
