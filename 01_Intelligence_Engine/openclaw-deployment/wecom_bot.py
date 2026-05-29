@@ -17,6 +17,10 @@ from Crypto.Cipher import AES
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("wecom_bot")
 
+# === 审单文档缓存池 ===
+USER_DOCUMENT_SESSIONS = {}
+USER_LAST_FILE = {}
+
 class WXBizMsgCrypt:
     def __init__(self, token, encoding_aes_key, corp_id):
         self.token = token
@@ -161,6 +165,12 @@ CAT_DIR_NAMES = {
 def classify_file(filename: str) -> str:
     """根据文件名判断文件类型，支持中英文 + 常见缩写"""
     fname_lower = filename.lower().strip()
+    
+    # 匹配提单号格式：通常为4位字母前缀+7至12位数字（例如：cosu6445120930）
+    base, _ = os.path.splitext(fname_lower)
+    if re.match(r'^[a-z]{4}\d{7,12}$', base):
+        return "bill_of_lading"
+        
     # 先匹配完整关键词
     for category, keywords in FILE_KEYWORDS.items():
         if category == "other":
@@ -330,6 +340,12 @@ def call_vision_ocr(file_path: str, doc_type: str) -> dict:
             f"- unit_price (提取单价)\n"
             f"- total_amount (提取总金额)\n"
             f"- latest_shipment_date (提取最晚装运期，格式 YYYY-MM-DD)\n"
+            f"- container_no (提取集装箱号，通常格式为4位字母+7位数字)\n"
+            f"- seal_no (提取封条号)\n"
+            f"- shipper_name (提取发货人/公司名称)\n"
+            f"- shipper_address (提取发货人地址)\n"
+            f"- consignee_name (提取收货人/公司名称)\n"
+            f"- consignee_address (提取收货人地址)\n"
             f"仅输出 JSON 格式，不要包含任何 markdown 标记或其他解释文本。"
         )
         
@@ -565,6 +581,116 @@ def wecom_gateway():
 
                 logger.info(f"[Kit] Received msg {msg_id[:8]}... from {user_id}: {content}")
 
+                content_clean = content.strip()
+                if content_clean in ["清空", "重置", "重新审核"]:
+                    if user_id in USER_DOCUMENT_SESSIONS:
+                        USER_DOCUMENT_SESSIONS[user_id] = {}
+                    send_reply_to_source(user_id, "🧹 已为您清空当前的审单文档缓存，可以开始上传新的单证进行审核。", response_url)
+                    with _processing_lock:
+                        _processing[msg_id]["done"].set()
+                    return "success"
+
+                # Check for manual category override
+                matched_category = None
+                category_name_cn = ""
+                if any(kw in content_clean for kw in ["这是提单", "设为提单", "改为提单", "为提单"]):
+                    matched_category = "bill_of_lading"
+                    category_name_cn = "提单"
+                elif any(kw in content_clean for kw in ["这是发票", "设为发票", "改为发票", "为发票"]):
+                    matched_category = "invoice"
+                    category_name_cn = "发票"
+                elif any(kw in content_clean for kw in ["这是装箱单", "设为装箱单", "改为装箱单", "为装箱单"]):
+                    matched_category = "packing_list"
+                    category_name_cn = "装箱单"
+
+                if matched_category:
+                    last_file_info = USER_LAST_FILE.get(user_id)
+                    if not last_file_info:
+                        send_reply_to_source(user_id, "⚠️ 未找到您最近上传的文件，请先发送文件/图片。", response_url)
+                        with _processing_lock:
+                            _processing[msg_id]["done"].set()
+                        return "success"
+                    
+                    saved_path = last_file_info["path"]
+                    file_title = last_file_info["filename"]
+                    
+                    send_reply_to_source(user_id, f"🔍 已收到指令，正在将 {file_title} 重新识别为【{category_name_cn}】并运行审核...", response_url)
+                    
+                    def _async_manual_process():
+                        try:
+                            ext = get_file_ext(saved_path)
+                            if ext in [".jpg", ".jpeg", ".png", ".bmp"]:
+                                ocr_data = call_vision_ocr(saved_path, matched_category)
+                                if ocr_data and audit_service:
+                                    if user_id not in USER_DOCUMENT_SESSIONS:
+                                        USER_DOCUMENT_SESSIONS[user_id] = {}
+                                    
+                                    doc_type_key = ocr_data.get('type') or matched_category.upper()
+                                    ocr_data['type'] = doc_type_key
+                                    USER_DOCUMENT_SESSIONS[user_id][doc_type_key] = ocr_data
+                                    
+                                    import asyncio
+                                    audit_result = asyncio.run(audit_service.run_full_audit(list(USER_DOCUMENT_SESSIONS[user_id].values())))
+                                    
+                                    session_docs = USER_DOCUMENT_SESSIONS[user_id]
+                                    doc_types_str = ", ".join([k for k in session_docs.keys()])
+                                    
+                                    extracted_summary = []
+                                    for dtype, ddata in session_docs.items():
+                                        parts = []
+                                        if ddata.get('net_weight') is not None: parts.append(f"净重: {ddata.get('net_weight')}")
+                                        if ddata.get('unit_price') is not None: parts.append(f"单价: {ddata.get('unit_price')}")
+                                        if ddata.get('total_amount') is not None: parts.append(f"总金额: {ddata.get('total_amount')}")
+                                        if ddata.get('container_no') is not None: parts.append(f"箱号: {ddata.get('container_no')}")
+                                        if ddata.get('seal_no') is not None: parts.append(f"封条号: {ddata.get('seal_no')}")
+                                        if ddata.get('shipper_name') is not None: parts.append(f"发货人: {ddata.get('shipper_name')}")
+                                        if ddata.get('shipper_address') is not None: parts.append(f"发货人地址: {ddata.get('shipper_address')}")
+                                        if ddata.get('consignee_name') is not None: parts.append(f"收货人: {ddata.get('consignee_name')}")
+                                        if ddata.get('consignee_address') is not None: parts.append(f"收货人地址: {ddata.get('consignee_address')}")
+                                        extracted_summary.append(f"📍 **{dtype}**:\n  - " + "\n  - ".join(parts))
+                                    
+                                    extracted_summary_str = "\n".join(extracted_summary)
+
+                                    if audit_result.get("findings"):
+                                        findings_str = "\n".join([f"- {f['finding']}" for f in audit_result["findings"]])
+                                    else:
+                                        findings_str = "- 未发现任何不符点或需要核对的内容。"
+
+                                    if audit_result["overall_status"] in ("DISCREPANCY_DETECTED", "WARNING"):
+                                        status_icon = "🚨"
+                                        status_title = "发现单据不符点/风险项"
+                                    else:
+                                        status_icon = "✅"
+                                        status_title = "审核核对完毕"
+
+                                    ai_reply = (
+                                        f"{status_icon} **Docu-Checker 智能审核结果 ({status_title})**\n"
+                                        f"当前接收文件：{file_title} ({matched_category.upper()})\n"
+                                        f"当前缓存池单证：{doc_types_str}\n\n"
+                                        f"📋 **提取单证关键信息：**\n{extracted_summary_str}\n\n"
+                                        f"🔍 **比对与核对结果：**\n{findings_str}\n\n"
+                                        f"👉 建议核实存档文件路径：{saved_path}\n"
+                                        f"💡 提示：如需重新开始审核，可发送指令“清空”或“重置”清空缓存池。"
+                                    )
+                                else:
+                                    ai_reply = f"⚠️ 视觉 OCR 提取失败或审核模块出错，请人工核实文件：{saved_path}"
+                            else:
+                                ai_reply = f"⚠️ 该文件不是图片格式，无法进行视觉识别：{saved_path}"
+                            
+                            send_reply_to_source(user_id, ai_reply, response_url)
+                        except Exception as e:
+                            logger.error(f"[Kit] Manual file process FAILED: {e}", exc_info=True)
+                            send_reply_to_source(user_id, f"⚠️ 处理失败：{str(e)}", response_url)
+                        finally:
+                            with _processing_lock:
+                                _processing[msg_id]["done"].set()
+                                stale = [k for k, v in _processing.items() if v["done"].is_set()]
+                                for k in stale[:50]:
+                                    del _processing[k]
+
+                    threading.Thread(target=_async_manual_process, daemon=True).start()
+                    return "success"
+
                 def _async_reply():
                     try:
                         t_start = time.time()
@@ -622,6 +748,13 @@ def wecom_gateway():
                         # 3. 归档
                         saved_path = archive_file(file_data, file_title, user_id, msg_id, category)
 
+                        # 记录最近上传的文件，便于后续手动修正类型
+                        USER_LAST_FILE[user_id] = {
+                            "path": saved_path,
+                            "filename": file_title,
+                            "size": len(file_data)
+                        }
+
                         # 4. 写入 Notion 归档记录
                         create_notion_record(file_title, category, user_id, saved_path, len(file_data), info["description"])
 
@@ -635,26 +768,56 @@ def wecom_gateway():
                                 ocr_data = call_vision_ocr(saved_path, category)
                                 
                                 if ocr_data and audit_service:
-                                    import asyncio
-                                    audit_result = asyncio.run(audit_service.run_full_audit([ocr_data]))
+                                    if user_id not in USER_DOCUMENT_SESSIONS:
+                                        USER_DOCUMENT_SESSIONS[user_id] = {}
                                     
-                                    if audit_result["overall_status"] == "SUCCESS":
-                                        ai_reply = (
-                                            f"✅ **Docu-Checker 视觉审核通过**\n"
-                                            f"文件：{file_title}\n"
-                                            f"提取数据：净重 {ocr_data.get('net_weight')} | 单价 {ocr_data.get('unit_price')}\n"
-                                            f"核对结果：未发现逻辑矛盾或风险点。"
-                                        )
+                                    doc_type_key = ocr_data.get('type') or category.upper()
+                                    ocr_data['type'] = doc_type_key
+                                    USER_DOCUMENT_SESSIONS[user_id][doc_type_key] = ocr_data
+                                    
+                                    import asyncio
+                                    audit_result = asyncio.run(audit_service.run_full_audit(list(USER_DOCUMENT_SESSIONS[user_id].values())))
+                                    
+                                    session_docs = USER_DOCUMENT_SESSIONS[user_id]
+                                    doc_types_str = ", ".join([k for k in session_docs.keys()])
+                                    
+                                    extracted_summary = []
+                                    for dtype, ddata in session_docs.items():
+                                        parts = []
+                                        if ddata.get('net_weight') is not None: parts.append(f"净重: {ddata.get('net_weight')}")
+                                        if ddata.get('unit_price') is not None: parts.append(f"单价: {ddata.get('unit_price')}")
+                                        if ddata.get('total_amount') is not None: parts.append(f"总金额: {ddata.get('total_amount')}")
+                                        if ddata.get('container_no') is not None: parts.append(f"箱号: {ddata.get('container_no')}")
+                                        if ddata.get('seal_no') is not None: parts.append(f"封条号: {ddata.get('seal_no')}")
+                                        if ddata.get('shipper_name') is not None: parts.append(f"发货人: {ddata.get('shipper_name')}")
+                                        if ddata.get('shipper_address') is not None: parts.append(f"发货人地址: {ddata.get('shipper_address')}")
+                                        if ddata.get('consignee_name') is not None: parts.append(f"收货人: {ddata.get('consignee_name')}")
+                                        if ddata.get('consignee_address') is not None: parts.append(f"收货人地址: {ddata.get('consignee_address')}")
+                                        extracted_summary.append(f"📍 **{dtype}**:\n  - " + "\n  - ".join(parts))
+                                    
+                                    extracted_summary_str = "\n".join(extracted_summary)
+
+                                    if audit_result.get("findings"):
+                                        findings_str = "\n".join([f"- {f['finding']}" for f in audit_result["findings"]])
                                     else:
-                                        findings_str = "\n".join([f"- {f['module']}: {f['finding']}" for f in audit_result["findings"]])
-                                        ai_reply = (
-                                            f"🚨 **Docu-Checker 发现单据不符点！**\n"
-                                            f"文件：{file_title}\n"
-                                            f"风险分数：{audit_result['risk_score']}\n"
-                                            f"提取数据：净重 {ocr_data.get('net_weight')} | 单价 {ocr_data.get('unit_price')} | 总价 {ocr_data.get('total_amount')}\n"
-                                            f"**发现问题：**\n{findings_str}\n\n"
-                                            f"👉 建议尽快核实存档文件：{saved_path}"
-                                        )
+                                        findings_str = "- 未发现任何不符点或需要核对的内容。"
+
+                                    if audit_result["overall_status"] in ("DISCREPANCY_DETECTED", "WARNING"):
+                                        status_icon = "🚨"
+                                        status_title = "发现单据不符点/风险项"
+                                    else:
+                                        status_icon = "✅"
+                                        status_title = "审核核对完毕"
+
+                                    ai_reply = (
+                                        f"{status_icon} **Docu-Checker 智能审核结果 ({status_title})**\n"
+                                        f"当前接收文件：{file_title} ({category.upper()})\n"
+                                        f"当前缓存池单证：{doc_types_str}\n\n"
+                                        f"📋 **提取单证关键信息：**\n{extracted_summary_str}\n\n"
+                                        f"🔍 **比对与核对结果：**\n{findings_str}\n\n"
+                                        f"👉 建议核实存档文件路径：{saved_path}\n"
+                                        f"💡 提示：如需重新开始审核，可发送指令“清空”或“重置”清空缓存池。"
+                                    )
                                 else:
                                     ai_reply = f"⚠️ 视觉 OCR 提取失败或审核模块出错，请人工核实文件：{saved_path}"
                             else:

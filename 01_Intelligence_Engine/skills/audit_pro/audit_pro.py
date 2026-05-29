@@ -71,6 +71,15 @@ class AuditProService:
                 results["overall_status"] = "WARNING"
                 results["risk_score"] += 30
 
+        # 3.1 核心逻辑 C：箱号、封条号与公司名称/地址审计 (Container, Seal & Parties Compliance)
+        logistics_findings = self._reconcile_logistics_and_parties(pl, bl, inv)
+        if logistics_findings:
+            results["findings"].extend(logistics_findings)
+            has_discrepancy = any("[不一致" in f["finding"] for f in logistics_findings)
+            if has_discrepancy:
+                results["overall_status"] = "DISCREPANCY_DETECTED"
+                results["risk_score"] += 30
+
         # 4. 如果发现高风险，立即通过 Handoff Manager 触发 Sentinel 重评
         if results["risk_score"] >= 40 and self.orchestrator:
             logger.warning(f"CRITICAL: Risk Score {results['risk_score']}! Triggering Sentinel via Orchestrator.")
@@ -132,6 +141,147 @@ class AuditProService:
             logger.error(f"LC Date Parsing Error: {e}")
             
         return alerts
+
+    def _reconcile_logistics_and_parties(self, pl, bl, inv) -> List[Dict]:
+        """
+        子模块：核对集装箱号、封条号与公司名称/地址。
+        """
+        findings = []
+        
+        def clean_val(v):
+            if not v or str(v).lower() == 'null': return ''
+            return str(v).strip()
+            
+        docs = [('PACKING_LIST', pl), ('BILL_OF_LADING', bl), ('INVOICE', inv)]
+        docs = [(name, d) for name, d in docs if d is not None]
+        
+        # --- CONTAINER NO CHECK ---
+        containers = {}
+        for name, d in docs:
+            containers[name] = clean_val(d.get('container_no'))
+            
+        active_containers = {k: v for k, v in containers.items() if v}
+        if len(active_containers) >= 2:
+            unique_vals = set(active_containers.values())
+            if len(unique_vals) == 1:
+                val = list(unique_vals)[0]
+                findings.append({
+                    "module": "CONTAINER_CHECK",
+                    "finding": f"箱号: {val} [重复]",
+                    "severity": "INFO"
+                })
+            else:
+                details = ", ".join([f"{k}为'{v}'" for k, v in active_containers.items()])
+                findings.append({
+                    "module": "CONTAINER_CHECK",
+                    "finding": f"箱号: [不一致: {details}]",
+                    "severity": "HIGH"
+                })
+        elif len(active_containers) == 1:
+            k, v = list(active_containers.items())[0]
+            findings.append({
+                "module": "CONTAINER_CHECK",
+                "finding": f"箱号: {v} (仅在 {k} 中发现)",
+                "severity": "INFO"
+            })
+            
+        # --- SEAL NO CHECK ---
+        seals = {}
+        for name, d in docs:
+            seals[name] = clean_val(d.get('seal_no'))
+            
+        active_seals = {k: v for k, v in seals.items() if v}
+        if len(active_seals) >= 2:
+            unique_vals = set(active_seals.values())
+            if len(unique_vals) == 1:
+                val = list(unique_vals)[0]
+                findings.append({
+                    "module": "SEAL_CHECK",
+                    "finding": f"封条号: {val} [重复]",
+                    "severity": "INFO"
+                })
+            else:
+                details = ", ".join([f"{k}为'{v}'" for k, v in active_seals.items()])
+                findings.append({
+                    "module": "SEAL_CHECK",
+                    "finding": f"封条号: [不一致: {details}]",
+                    "severity": "HIGH"
+                })
+        elif len(active_seals) == 1:
+            k, v = list(active_seals.items())[0]
+            findings.append({
+                "module": "SEAL_CHECK",
+                "finding": f"封条号: {v} (仅在 {k} 中发现)",
+                "severity": "INFO"
+            })
+            
+        # --- COMPANY NAME & ADDRESS CHECK (PL vs INV) ---
+        if pl and inv:
+            pl_shipper = clean_val(pl.get('shipper_name'))
+            inv_shipper = clean_val(inv.get('shipper_name'))
+            if pl_shipper and inv_shipper:
+                if pl_shipper == inv_shipper:
+                    findings.append({
+                        "module": "SHIPPER_NAME_CHECK",
+                        "finding": f"发货人公司名称: {pl_shipper} [重复]",
+                        "severity": "INFO"
+                    })
+                else:
+                    findings.append({
+                        "module": "SHIPPER_NAME_CHECK",
+                        "finding": f"发货人公司名称: [不一致: 装箱单为'{pl_shipper}', 发票为'{inv_shipper}']",
+                        "severity": "HIGH"
+                    })
+                    
+            pl_saddr = clean_val(pl.get('shipper_address'))
+            inv_saddr = clean_val(inv.get('shipper_address'))
+            if pl_saddr and inv_saddr:
+                if pl_saddr == inv_saddr:
+                    findings.append({
+                        "module": "SHIPPER_ADDRESS_CHECK",
+                        "finding": f"发货人地址: {pl_saddr} [重复]",
+                        "severity": "INFO"
+                    })
+                else:
+                    findings.append({
+                        "module": "SHIPPER_ADDRESS_CHECK",
+                        "finding": f"发货人地址: [不一致: 装箱单为'{pl_saddr}', 发票为'{inv_saddr}']",
+                        "severity": "HIGH"
+                    })
+                    
+            pl_consignee = clean_val(pl.get('consignee_name'))
+            inv_consignee = clean_val(inv.get('consignee_name'))
+            if pl_consignee and inv_consignee:
+                if pl_consignee == inv_consignee:
+                    findings.append({
+                        "module": "CONSIGNEE_NAME_CHECK",
+                        "finding": f"收货人公司名称: {pl_consignee} [重复]",
+                        "severity": "INFO"
+                    })
+                else:
+                    findings.append({
+                        "module": "CONSIGNEE_NAME_CHECK",
+                        "finding": f"收货人公司名称: [不一致: 装箱单为'{pl_consignee}', 发票为'{inv_consignee}']",
+                        "severity": "HIGH"
+                    })
+                    
+            pl_caddr = clean_val(pl.get('consignee_address'))
+            inv_caddr = clean_val(inv.get('consignee_address'))
+            if pl_caddr and inv_caddr:
+                if pl_caddr == inv_caddr:
+                    findings.append({
+                        "module": "CONSIGNEE_ADDRESS_CHECK",
+                        "finding": f"收货人地址: {pl_caddr} [重复]",
+                        "severity": "INFO"
+                    })
+                else:
+                    findings.append({
+                        "module": "CONSIGNEE_ADDRESS_CHECK",
+                        "finding": f"收货人地址: [不一致: 装箱单为'{pl_caddr}', 发票为'{inv_caddr}']",
+                        "severity": "HIGH"
+                    })
+                    
+        return findings
 
 if __name__ == "__main__":
     audit = AuditProService()
