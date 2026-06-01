@@ -3,8 +3,17 @@ dist/
 .env
 .env.*
 __pycache__/
+*.pyc
+*.pyo
 *.log
 
 # Sensitive data — never commit to git
 **/ferroalloy_session.json
 01_Intelligence_Engine/skills/market_scout/data/
+
+# Generated data & logs
+01_Intelligence_Engine/skills/data/chroma_db_storage/
+01_Intelligence_Engine/skills/data/scout/excel/
+01_Intelligence_Engine/skills/logs/
+data/
+scratch/
