@@ -17,11 +17,15 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
 # ===== 配置 =====
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "scout_config.json")
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    CONFIG = json.load(f)
+
 SESSION_DIR = os.getenv("SCOUT_SESSION_DIR", os.path.join(os.path.dirname(__file__), "data"))
 SESSION_FILE = os.path.join(SESSION_DIR, "ferroalloy_session.json")
 HISTORY_FILE = os.getenv(
     "SCOUT_HISTORY_FILE",
-    os.path.join(os.path.dirname(__file__), "data", "market_indices_history.csv"),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), CONFIG["output_paths"].get("history_csv")))
 )
 
 # 会员专区需要登录才能访问的页面 URL（价格明细表）
@@ -114,7 +118,8 @@ async def run_playwright_collection() -> bool:
     df["index_id"] = "pw_" + df["index_name"]  # 加前缀区分来源
 
     if os.path.exists(HISTORY_FILE):
-        existing = pd.read_csv(HISTORY_FILE)
+        existing = pd.read_csv(HISTORY_FILE, dtype={'index_id': str})
+        df['index_id'] = df['index_id'].astype(str)
         df = pd.concat([existing, df]).drop_duplicates(subset=["date", "index_id"])
 
     df = df.sort_values(by=["index_id", "date"], ascending=[True, False])

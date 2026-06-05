@@ -53,8 +53,10 @@ def parse_table_html(html):
             date = cols[0].get_text(strip=True)
             value = cols[1].get_text(strip=True)
             try:
-                rows.append({"date": date, "value": float(value)})
-            except:
+                # 移除数值中的逗号，防止如 "1,536.00" 的数值解析为 float 报错
+                clean_value = float(value.replace(",", ""))
+                rows.append({"date": date, "value": clean_value})
+            except Exception as e:
                 pass
     return rows
 
@@ -107,7 +109,8 @@ async def run_scout_collection(years=3):
         final_df = pd.concat(all_indices_df)
         # Handle duplicates and sort
         if os.path.exists(HISTORY_FILE):
-            existing_df = pd.read_csv(HISTORY_FILE)
+            existing_df = pd.read_csv(HISTORY_FILE, dtype={'index_id': str})
+            final_df['index_id'] = final_df['index_id'].astype(str)
             final_df = pd.concat([existing_df, final_df]).drop_duplicates(subset=['date', 'index_id'])
             
         final_df = final_df.sort_values(by=['index_id', 'date'], ascending=[True, False])

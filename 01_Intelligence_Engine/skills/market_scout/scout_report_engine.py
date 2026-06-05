@@ -43,15 +43,21 @@ async def generate_daily_scout_report():
     prev_data = df[df['date'] == prev_date] if pd.notna(prev_date) else None
 
     def get_change(idx_name):
-        curr = latest_data[latest_data['index_name'] == idx_name]['value'].values
-        if len(curr) == 0:
+        # 使用模糊/子串匹配以适配如 "四川钛精矿" 匹配 "四川钛精矿(Ti>47%)" 的差异
+        curr_row = latest_data[latest_data['index_name'].str.contains(idx_name, na=False, regex=False)]
+        if len(curr_row) == 0:
             return None, None
-        curr_val = curr[0]
+        curr_val = curr_row['value'].values[0]
+        full_name = curr_row['index_name'].values[0]
+        
+        prev_val = curr_val
         if prev_data is not None:
-            prev_vals = prev_data[prev_data['index_name'] == idx_name]['value'].values
-            prev_val = prev_vals[0] if len(prev_vals) > 0 else curr_val
-        else:
-            prev_val = curr_val
+            prev_row = prev_data[prev_data['index_name'] == full_name]
+            if len(prev_row) == 0:
+                prev_row = prev_data[prev_data['index_name'].str.contains(idx_name, na=False, regex=False)]
+            if len(prev_row) > 0:
+                prev_val = prev_row['value'].values[0]
+                
         change_pct = ((curr_val - prev_val) / prev_val * 100) if prev_val != 0 else 0
         return curr_val, change_pct
 
