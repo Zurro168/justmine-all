@@ -13,3 +13,6 @@ openpyxl
 beautifulsoup4
 lxml
 pycryptodome
+pypdf
+python-docx
+pdf2image

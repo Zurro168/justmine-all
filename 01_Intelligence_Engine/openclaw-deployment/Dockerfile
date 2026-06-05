@@ -5,6 +5,7 @@ WORKDIR /app
 
 # 1. 自动检测并同步 Python 依赖环境 (支持多级目录)
 COPY openclaw-deployment/requirements.txt requirements.txt
+RUN apt-get update && apt-get install -y poppler-utils && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 2. 同步全量智控大脑业务代码 (包括 skills 和 bots)
