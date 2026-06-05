@@ -13,6 +13,11 @@ from datetime import datetime
 from flask import Flask, request, make_response, jsonify
 from Crypto.Cipher import AES
 
+try:
+    import file_extractor
+except ImportError:
+    file_extractor = None
+
 # 初始化日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("wecom_bot")
@@ -821,18 +826,127 @@ def wecom_gateway():
                                 else:
                                     ai_reply = f"⚠️ 视觉 OCR 提取失败或审核模块出错，请人工核实文件：{saved_path}"
                             else:
-                                # 非图片文件，退回文字 Checklist 策略
-                                prompt = (
-                                    f"群里客户上传了文件：{file_title}\n"
-                                    f"文件大小 {len(file_data)/1024:.0f} KB，格式 {ext}\n"
-                                    f"系统推断类型：{CAT_DIR_NAMES.get(category, '未知')}\n"
-                                    f"文件已归档到 {saved_path}\n\n"
-                                    f"目前视觉中枢仅支持图片识别，请针对该类单证给出：\n"
-                                    f"1. 必须核对的关键字段清单\n"
-                                    f"2. 常见造假/错误风险点\n"
-                                    f"3. 提醒业务员手动打开文件逐一核对"
-                                )
-                                ai_reply = process_message_via_agents(prompt, user_id)
+                                # PDF, Word, Excel 等文档自动提取和审核
+                                send_reply_to_source(user_id, f"🔍 正在启动【Docu-Checker 文档中枢】解析 {file_title} 的内容...", response_url)
+                                
+                                ocr_data = None
+                                error_msg = None
+                                
+                                try:
+                                    extracted_text = ""
+                                    if ext == ".pdf":
+                                        try:
+                                            extracted_text = file_extractor.extract_pdf_text(saved_path)
+                                        except ImportError:
+                                            error_msg = "pip install pypdf"
+                                    elif ext in [".docx", ".doc"]:
+                                        try:
+                                            extracted_text = file_extractor.extract_docx_text(saved_path)
+                                        except ImportError:
+                                            error_msg = "pip install python-docx"
+                                    elif ext in [".xlsx", ".xls"]:
+                                        try:
+                                            extracted_text = file_extractor.extract_xlsx_text(saved_path)
+                                        except ImportError:
+                                            error_msg = "pip install pandas openpyxl"
+                                    elif ext in [".csv", ".txt"]:
+                                        with open(saved_path, "r", encoding="utf-8", errors="ignore") as f:
+                                            extracted_text = f.read()
+                                            
+                                    if error_msg:
+                                        ai_reply = (
+                                            f"⚠️ **解析库未安装**\n"
+                                            f"系统检测到未安装处理 {ext} 文件所需的 Python 依赖库。\n"
+                                            f"请联系系统管理员在服务器上运行以下安装命令：\n"
+                                            f"`pip install pypdf python-docx pandas openpyxl`\n\n"
+                                            f"👉 临时方案：请将文件另存为 **图片** 发送给机器人进行自动审核。"
+                                        )
+                                        send_reply_to_source(user_id, ai_reply, response_url)
+                                        return
+                                        
+                                    if not extracted_text.strip():
+                                        # 如果是 PDF 且无文本，尝试转换为图片再识别
+                                        if ext == ".pdf":
+                                            send_reply_to_source(user_id, f"💡 检测到 {file_title} 可能是扫描件 PDF，正在尝试转换为图片以进行视觉识别...", response_url)
+                                            images = file_extractor.convert_pdf_to_images(saved_path, os.path.dirname(saved_path))
+                                            if images:
+                                                # 使用第一页的图片运行视觉识别
+                                                ocr_data = call_vision_ocr(images[0], category)
+                                                # 清理生成的临时图片
+                                                for img in images:
+                                                    try: os.remove(img)
+                                                    except: pass
+                                            if not ocr_data:
+                                                ai_reply = f"⚠️ 该 PDF 文件无数字化文本且系统未配置 pdf2image 转换环境，请直接发送单证的清晰图片进行审核。"
+                                                send_reply_to_source(user_id, ai_reply, response_url)
+                                                return
+                                        else:
+                                            ai_reply = f"⚠️ 无法读取 {file_title} 中的任何内容，请确认该文档非空且没有被加密。"
+                                            send_reply_to_source(user_id, ai_reply, response_url)
+                                            return
+                                    else:
+                                        # 使用文本提取器获取 JSON
+                                        ocr_data = file_extractor.extract_fields_from_text(extracted_text, category)
+                                        
+                                    # 运行多文档全量比对审核
+                                    if ocr_data and audit_service:
+                                        if user_id not in USER_DOCUMENT_SESSIONS:
+                                            USER_DOCUMENT_SESSIONS[user_id] = {}
+                                        
+                                        doc_type_key = ocr_data.get('type') or category.upper()
+                                        ocr_data['type'] = doc_type_key
+                                        USER_DOCUMENT_SESSIONS[user_id][doc_type_key] = ocr_data
+                                        
+                                        import asyncio
+                                        audit_result = asyncio.run(audit_service.run_full_audit(list(USER_DOCUMENT_SESSIONS[user_id].values())))
+                                        
+                                        session_docs = USER_DOCUMENT_SESSIONS[user_id]
+                                        doc_types_str = ", ".join([k for k in session_docs.keys()])
+                                        
+                                        extracted_summary = []
+                                        for dtype, ddata in session_docs.items():
+                                            parts = []
+                                            if ddata.get('net_weight') is not None: parts.append(f"净重: {ddata.get('net_weight')}")
+                                            if ddata.get('unit_price') is not None: parts.append(f"单价: {ddata.get('unit_price')}")
+                                            if ddata.get('total_amount') is not None: parts.append(f"总金额: {ddata.get('total_amount')}")
+                                            if ddata.get('container_no') is not None: parts.append(f"箱号: {ddata.get('container_no')}")
+                                            if ddata.get('seal_no') is not None: parts.append(f"封条号: {ddata.get('seal_no')}")
+                                            if ddata.get('shipper_name') is not None: parts.append(f"发货人: {ddata.get('shipper_name')}")
+                                            if ddata.get('shipper_address') is not None: parts.append(f"发货人地址: {ddata.get('shipper_address')}")
+                                            if ddata.get('consignee_name') is not None: parts.append(f"收货人: {ddata.get('consignee_name')}")
+                                            if ddata.get('consignee_address') is not None: parts.append(f"收货人地址: {ddata.get('consignee_address')}")
+                                            extracted_summary.append(f"📍 **{dtype}**:\n  - " + "\n  - ".join(parts))
+                                        
+                                        extracted_summary_str = "\n".join(extracted_summary)
+
+                                        if audit_result.get("findings"):
+                                            findings_str = "\n".join([f"- {f['finding']}" for f in audit_result["findings"]])
+                                        else:
+                                            findings_str = "- 未发现任何不符点或需要核对的内容。"
+
+                                        if audit_result["overall_status"] in ("DISCREPANCY_DETECTED", "WARNING"):
+                                            status_icon = "🚨"
+                                            status_title = "发现单据不符点/风险项"
+                                        else:
+                                            status_icon = "✅"
+                                            status_title = "审核核对完毕"
+
+                                        ai_reply = (
+                                            f"{status_icon} **Docu-Checker 智能审核结果 ({status_title})**\n"
+                                            f"当前接收文件：{file_title} ({category.upper()})\n"
+                                            f"当前缓存池单证：{doc_types_str}\n\n"
+                                            f"📋 **提取单证关键信息：**\n{extracted_summary_str}\n\n"
+                                            f"🔍 **比对与核对结果：**\n{findings_str}\n\n"
+                                            f"👉 建议核实存档文件路径：{saved_path}\n"
+                                            f"💡 提示：如需重新开始审核，可发送指令“清空”或“重置”清空缓存池。"
+                                        )
+                                    else:
+                                        ai_reply = f"⚠️ 提取失败或审核模块出错，请人工核实文件内容。"
+                                        
+                                    send_reply_to_source(user_id, ai_reply, response_url)
+                                except Exception as e:
+                                    logger.error(f"Failed to process doc: {e}", exc_info=True)
+                                    send_reply_to_source(user_id, f"⚠️ 处理文档 {file_title} 时发生错误：{e}", response_url)
                         elif category == "image":
                             ai_reply = (
                                 f"📸 **图片已归档**\n"
@@ -1122,17 +1236,127 @@ def wecom_gateway():
                                 else:
                                     ai_reply = f"⚠️ 视觉 OCR 提取失败或审核模块出错，请人工核实文件：{saved_path}"
                             else:
-                                prompt = (
-                                    f"用户上传了文件：{file_title}\n"
-                                    f"文件大小 {len(file_data)/1024:.0f} KB，格式 {ext}\n"
-                                    f"系统推断类型：{CAT_DIR_NAMES.get(category, '未知')}\n"
-                                    f"文件已归档到 {saved_path}\n\n"
-                                    f"目前视觉中枢仅支持图片识别，请针对该类单证给出：\n"
-                                    f"1. 必须核对的关键字段清单\n"
-                                    f"2. 常见造假/错误风险点\n"
-                                    f"3. 提醒业务员手动打开文件逐一核对"
-                                )
-                                ai_reply = process_message_via_agents(prompt, user_id)
+                                # PDF, Word, Excel 等文档自动提取和审核
+                                send_reply_to_source(user_id, f"🔍 正在启动【Docu-Checker 文档中枢】解析 {file_title} 的内容...", "")
+                                
+                                ocr_data = None
+                                error_msg = None
+                                
+                                try:
+                                    extracted_text = ""
+                                    if ext == ".pdf":
+                                        try:
+                                            extracted_text = file_extractor.extract_pdf_text(saved_path)
+                                        except ImportError:
+                                            error_msg = "pip install pypdf"
+                                    elif ext in [".docx", ".doc"]:
+                                        try:
+                                            extracted_text = file_extractor.extract_docx_text(saved_path)
+                                        except ImportError:
+                                            error_msg = "pip install python-docx"
+                                    elif ext in [".xlsx", ".xls"]:
+                                        try:
+                                            extracted_text = file_extractor.extract_xlsx_text(saved_path)
+                                        except ImportError:
+                                            error_msg = "pip install pandas openpyxl"
+                                    elif ext in [".csv", ".txt"]:
+                                        with open(saved_path, "r", encoding="utf-8", errors="ignore") as f:
+                                            extracted_text = f.read()
+                                            
+                                    if error_msg:
+                                        ai_reply = (
+                                            f"⚠️ **解析库未安装**\n"
+                                            f"系统检测到未安装处理 {ext} 文件所需的 Python 依赖库。\n"
+                                            f"请联系系统管理员在服务器上运行以下安装命令：\n"
+                                            f"`pip install pypdf python-docx pandas openpyxl`\n\n"
+                                            f"👉 临时方案：请将文件另存为 **图片** 发送给机器人进行自动审核。"
+                                        )
+                                        send_reply_to_source(user_id, ai_reply, "")
+                                        return
+                                        
+                                    if not extracted_text.strip():
+                                        # 如果是 PDF 且无文本，尝试转换为图片再识别
+                                        if ext == ".pdf":
+                                            send_reply_to_source(user_id, f"💡 检测到 {file_title} 可能是扫描件 PDF，正在尝试转换为图片以进行视觉识别...", "")
+                                            images = file_extractor.convert_pdf_to_images(saved_path, os.path.dirname(saved_path))
+                                            if images:
+                                                # 使用第一页的图片运行视觉识别
+                                                ocr_data = call_vision_ocr(images[0], category)
+                                                # 清理生成的临时图片
+                                                for img in images:
+                                                    try: os.remove(img)
+                                                    except: pass
+                                            if not ocr_data:
+                                                ai_reply = f"⚠️ 该 PDF 文件无数字化文本且系统未配置 pdf2image 转换环境，请直接发送单证的清晰图片进行审核。"
+                                                send_reply_to_source(user_id, ai_reply, "")
+                                                return
+                                        else:
+                                            ai_reply = f"⚠️ 无法读取 {file_title} 中的任何内容，请确认该文档非空且没有被加密。"
+                                            send_reply_to_source(user_id, ai_reply, "")
+                                            return
+                                    else:
+                                        # 使用文本提取器获取 JSON
+                                        ocr_data = file_extractor.extract_fields_from_text(extracted_text, category)
+                                        
+                                    # 运行多文档全量比对审核
+                                    if ocr_data and audit_service:
+                                        if user_id not in USER_DOCUMENT_SESSIONS:
+                                            USER_DOCUMENT_SESSIONS[user_id] = {}
+                                        
+                                        doc_type_key = ocr_data.get('type') or category.upper()
+                                        ocr_data['type'] = doc_type_key
+                                        USER_DOCUMENT_SESSIONS[user_id][doc_type_key] = ocr_data
+                                        
+                                        import asyncio
+                                        audit_result = asyncio.run(audit_service.run_full_audit(list(USER_DOCUMENT_SESSIONS[user_id].values())))
+                                        
+                                        session_docs = USER_DOCUMENT_SESSIONS[user_id]
+                                        doc_types_str = ", ".join([k for k in session_docs.keys()])
+                                        
+                                        extracted_summary = []
+                                        for dtype, ddata in session_docs.items():
+                                            parts = []
+                                            if ddata.get('net_weight') is not None: parts.append(f"净重: {ddata.get('net_weight')}")
+                                            if ddata.get('unit_price') is not None: parts.append(f"单价: {ddata.get('unit_price')}")
+                                            if ddata.get('total_amount') is not None: parts.append(f"总金额: {ddata.get('total_amount')}")
+                                            if ddata.get('container_no') is not None: parts.append(f"箱号: {ddata.get('container_no')}")
+                                            if ddata.get('seal_no') is not None: parts.append(f"封条号: {ddata.get('seal_no')}")
+                                            if ddata.get('shipper_name') is not None: parts.append(f"发货人: {ddata.get('shipper_name')}")
+                                            if ddata.get('shipper_address') is not None: parts.append(f"发货人地址: {ddata.get('shipper_address')}")
+                                            if ddata.get('consignee_name') is not None: parts.append(f"收货人: {ddata.get('consignee_name')}")
+                                            if ddata.get('consignee_address') is not None: parts.append(f"收货人地址: {ddata.get('consignee_address')}")
+                                            extracted_summary.append(f"📍 **{dtype}**:\n  - " + "\n  - ".join(parts))
+                                        
+                                        extracted_summary_str = "\n".join(extracted_summary)
+
+                                        if audit_result.get("findings"):
+                                            findings_str = "\n".join([f"- {f['finding']}" for f in audit_result["findings"]])
+                                        else:
+                                            findings_str = "- 未发现任何不符点或需要核对的内容。"
+
+                                        if audit_result["overall_status"] in ("DISCREPANCY_DETECTED", "WARNING"):
+                                            status_icon = "🚨"
+                                            status_title = "发现单据不符点/风险项"
+                                        else:
+                                            status_icon = "✅"
+                                            status_title = "审核核对完毕"
+
+                                        ai_reply = (
+                                            f"{status_icon} **Docu-Checker 智能审核结果 ({status_title})**\n"
+                                            f"当前接收文件：{file_title} ({category.upper()})\n"
+                                            f"当前缓存池单证：{doc_types_str}\n\n"
+                                            f"📋 **提取单证关键信息：**\n{extracted_summary_str}\n\n"
+                                            f"🔍 **比对与核对结果：**\n{findings_str}\n\n"
+                                            f"👉 建议核实存档文件路径：{saved_path}\n"
+                                            f"💡 提示：如需重新开始审核，可发送指令“清空”或“重置”清空缓存池。"
+                                        )
+                                    else:
+                                        ai_reply = f"⚠️ 提取失败或审核模块出错，请人工核实文件内容。"
+                                        
+                                    send_reply_to_source(user_id, ai_reply, "")
+                                except Exception as e:
+                                    logger.error(f"Failed to process doc: {e}", exc_info=True)
+                                    send_reply_to_source(user_id, f"⚠️ 处理文档 {file_title} 时发生错误：{e}", "")
                         elif category == "image":
                             ai_reply = (
                                 f"📸 **图片已归档**\n"
