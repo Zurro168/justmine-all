@@ -25,6 +25,7 @@ logger = logging.getLogger("wecom_bot")
 # === 审单文档缓存池 ===
 USER_DOCUMENT_SESSIONS = {}
 USER_LAST_FILE = {}
+USER_RECENT_FILES = {}
 
 class WXBizMsgCrypt:
     def __init__(self, token, encoding_aes_key, corp_id):
@@ -307,10 +308,49 @@ def create_notion_record(filename: str, category: str, sender: str, saved_path: 
 def process_message_via_agents(user_message: str, user_id: str) -> str:
     """Route message through Jaguar and execute the target agent."""
     logger.info(f"[Pipeline] Step 1: Dispatching task for user {user_id}")
+    
+    # 获取用户最近上传的所有文件文本内容，并作为上下文喂给大模型
+    recent_files_context = ""
+    recent_files = USER_RECENT_FILES.get(user_id, [])
+    if recent_files and file_extractor:
+        files_text_list = []
+        for f_info in recent_files:
+            f_path = f_info.get("path")
+            f_name = f_info.get("filename", "unknown")
+            if not f_path or not os.path.exists(f_path):
+                continue
+            ext = get_file_ext(f_path)
+            txt = ""
+            try:
+                if ext == ".pdf":
+                    txt = file_extractor.extract_pdf_text(f_path)
+                elif ext in [".docx", ".doc"]:
+                    txt = file_extractor.extract_docx_text(f_path)
+                elif ext in [".xlsx", ".xls"]:
+                    txt = file_extractor.extract_xlsx_text(f_path)
+                elif ext in [".csv", ".txt"]:
+                    with open(f_path, "r", encoding="utf-8", errors="ignore") as f:
+                        txt = f.read()
+            except Exception as e:
+                logger.error(f"Failed to extract text from {f_name} for agent context: {e}")
+            
+            if txt.strip():
+                # 限制每个文档提取的内容，防止超出 LLM 上下文窗口限制
+                files_text_list.append(f"【文档文件名: {f_name}】\n内容如下:\n{txt[:6000]}")
+        
+        if files_text_list:
+            recent_files_context = "\n\n=== 以下是该用户最近上传并归档的文档文本内容，请结合它们回答用户的问题 ===\n" + "\n\n".join(files_text_list)
+
     routing = factory.dispatch_task(user_message)
     target = routing.get("target_agent", "scout")
-    logger.info(f"[Pipeline] Step 2: Executing agent '{target}'")
-    reply = factory.execute_agent(target, user_message, {
+    
+    # 将文件内容作为上下文拼入消息，让大模型直接感知文件内容并做比对
+    extended_message = user_message
+    if recent_files_context:
+        extended_message += recent_files_context
+        
+    logger.info(f"[Pipeline] Step 2: Executing agent '{target}' with context length {len(extended_message)}")
+    reply = factory.execute_agent(target, extended_message, {
         "user_id": user_id,
         "source": "wecom",
         "routing_params": routing.get("extracted_parameters", {})
@@ -590,6 +630,8 @@ def wecom_gateway():
                 if content_clean in ["清空", "重置", "重新审核"]:
                     if user_id in USER_DOCUMENT_SESSIONS:
                         USER_DOCUMENT_SESSIONS[user_id] = {}
+                    if user_id in USER_RECENT_FILES:
+                        USER_RECENT_FILES[user_id] = []
                     send_reply_to_source(user_id, "🧹 已为您清空当前的审单文档缓存，可以开始上传新的单证进行审核。", response_url)
                     with _processing_lock:
                         _processing[msg_id]["done"].set()
@@ -759,6 +801,17 @@ def wecom_gateway():
                             "filename": file_title,
                             "size": len(file_data)
                         }
+                        
+                        # 记录最近上传的文件历史（最多保留5个）
+                        if user_id not in USER_RECENT_FILES:
+                            USER_RECENT_FILES[user_id] = []
+                        USER_RECENT_FILES[user_id].append({
+                            "path": saved_path,
+                            "filename": file_title,
+                            "size": len(file_data)
+                        })
+                        if len(USER_RECENT_FILES[user_id]) > 5:
+                            USER_RECENT_FILES[user_id].pop(0)
 
                         # 4. 写入 Notion 归档记录
                         create_notion_record(file_title, category, user_id, saved_path, len(file_data), info["description"])
@@ -1004,6 +1057,8 @@ def wecom_gateway():
                 if content_clean in ["清空", "重置", "重新审核"]:
                     if user_id in USER_DOCUMENT_SESSIONS:
                         USER_DOCUMENT_SESSIONS[user_id] = {}
+                    if user_id in USER_RECENT_FILES:
+                        USER_RECENT_FILES[user_id] = []
                     ai_reply = "🧹 已为您清空当前的审单文档缓存，可以开始上传新的单证进行审核。"
                 else:
                     # Check for manual category override
@@ -1170,6 +1225,17 @@ def wecom_gateway():
                             "filename": file_title,
                             "size": len(file_data)
                         }
+                        
+                        # 记录最近上传的文件历史（最多保留5个）
+                        if user_id not in USER_RECENT_FILES:
+                            USER_RECENT_FILES[user_id] = []
+                        USER_RECENT_FILES[user_id].append({
+                            "path": saved_path,
+                            "filename": file_title,
+                            "size": len(file_data)
+                        })
+                        if len(USER_RECENT_FILES[user_id]) > 5:
+                            USER_RECENT_FILES[user_id].pop(0)
 
                         # 4. 写入 Notion 归档记录
                         create_notion_record(file_title, category, user_id, saved_path, len(file_data), info["description"])
