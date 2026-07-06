@@ -51,7 +51,7 @@ const NAV_GROUPS = [
 const UNREAD_COUNT = 2;
 
 const Navbar = () => {
-  const { activeTab, setActiveTab, isLoggedIn, user, login, logout } = useStore();
+  const { activeTab, setActiveTab, isLoggedIn, user, logout } = useStore();
   const [openGroup, setOpenGroup] = useState(null);
   const [showSearch, setShowSearch] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);

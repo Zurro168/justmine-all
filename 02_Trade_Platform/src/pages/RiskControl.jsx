@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { SectionTitle, Card } from '../components/ui';
 import { 
-  Shield, AlertTriangle, CheckCircle2, DollarSign, Calendar, 
-  TrendingUp, TrendingDown, Clock, ShieldCheck, Activity,
-  ArrowUpRight, ArrowDownRight, Zap, Info, Lock, Unlock
+  Shield, AlertTriangle, CheckCircle2, Calendar,
+  Clock, ShieldCheck, Activity, ChevronRight,
+  ArrowUpRight, ArrowDownRight, Zap, Lock, Unlock
 } from 'lucide-react';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, 
-  ResponsiveContainer, BarChart, Bar, Cell, PieChart, Pie
+  ResponsiveContainer, Cell, PieChart, Pie
 } from 'recharts';
 
 const CREDIT_USAGE = [

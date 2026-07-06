@@ -35,7 +35,7 @@ const SandboxPage = () => {
         } else {
           setIsConnected(false);
         }
-      } catch (err) {
+      } catch {
         setIsConnected(false);
       }
     };

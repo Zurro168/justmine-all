@@ -2,6 +2,7 @@
 import os
 import json
 import logging
+import sys
 from pathlib import Path
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -13,15 +14,52 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": os.getenv("ALLOWED_ORIGINS", "*")}})
+CORS(app, resources={
+    r"/api/*": {"origins": os.getenv("ALLOWED_ORIGINS", "*")},
+    r"/health": {"origins": os.getenv("ALLOWED_ORIGINS", "*")},
+})
 
 import requests
 import uuid
 import datetime
 
+sys.path.append(str(Path(__file__).resolve().parents[1] / "bots"))
+from agent_factory_v2 import OpenClawAgentFactory, is_placeholder_secret
+
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 MESSAGES_FILE = DATA_DIR / "sandbox_messages.json"
+factory = OpenClawAgentFactory()
+
+def env_flag(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+def secret_status(value):
+    if not value:
+        return "missing"
+    if is_placeholder_secret(value):
+        return "placeholder"
+    return "configured"
+
+def dependency_status():
+    return {
+        "deepseek": secret_status(os.getenv("DEEPSEEK_API_KEY")),
+        "dashscope": secret_status(os.getenv("DASHSCOPE_API_KEY")),
+        "wecom_webhook": secret_status(os.getenv("WECOM_WEBHOOK_URL")),
+    }
+
+def resolve_health_status(deps, mock_mode=False):
+    if all(status == "configured" for status in deps.values()):
+        return "online"
+    if mock_mode:
+        return "mock"
+    return "degraded"
+
+def can_use_real_agents():
+    return not env_flag("AI_MOCK_MODE", default=True) and secret_status(os.getenv("DEEPSEEK_API_KEY")) == "configured"
 
 def load_messages():
     if MESSAGES_FILE.exists():
@@ -41,9 +79,21 @@ def save_messages(messages):
 
 sandbox_messages = load_messages()
 
+def mock_agent_reply(query):
+    normalized = (query or "").lower()
+    if any(token in normalized for token in [".pdf", "pdf", "sgs", "invoice", "b/l", "单据", "审核", "提单", "发票"]):
+        return "【Docu-Checker】当前处于待命状态。请上传 SGS 扫描件获取真实报告。"
+    if any(token in normalized for token in ["iluka", "报价", "行情", "价格", "market", "price"]):
+        return "【Market-Scout】正在侦测本地数据源...当前深层爬虫尚未开启，本周行情请参照官网报盘。"
+    if any(token in normalized for token in ["付款", "谈判", "tt", "供应商"]):
+        return "【Negotiator】已进入采购谈判辅助模式。请补充供应商名称、付款条件和目标价格区间。"
+    if any(token in normalized for token in ["客户", "销售", "到港", "撮合"]):
+        return "【Matchmaker】已进入客户撮合模式。请提供货物指标、到港时间和目标销售区域。"
+    return "【Jaguar 智能中枢】指令接收。请问是查询[报价]、审核[单据]、处理[付款谈判]，还是进行[客户撮合]？"
+
 @app.route('/api/chat', methods=['POST'])
 def chat_api():
-    query = request.json.get('query', '').lower()
+    query = request.json.get('query', '').strip()
     logger.info(f"Chat query: {query}")
     reply = "【Jaguar 智能中枢】指令接收。请问是查询[报价]还是审核[单据]？"
     if ".pdf" in query or "单据" in query:
@@ -51,8 +101,19 @@ def chat_api():
     elif "iluka" in query or "报价" in query:
         reply = "【Market-Scout】正在侦测本地数据源...当前深层爬虫尚未开启，本周行情请参照官网报盘。"
 
+    routing = factory.dispatch_task(query)
+    target_agent = routing.get("target_agent", "scout")
+    routing_mode = routing.get("routing_mode", "llm")
+    if can_use_real_agents():
+        reply = factory.execute_agent(target_agent, query, {
+            "source": "dashboard",
+            "routing": routing,
+        })
+    else:
+        reply = mock_agent_reply(query)
+
     wecom_webhook = os.getenv("WECOM_WEBHOOK_URL")
-    if wecom_webhook and wecom_webhook.startswith("http"):
+    if secret_status(wecom_webhook) == "configured" and wecom_webhook.startswith("http"):
         try:
             payload = {
                 "msgtype": "text",
@@ -65,7 +126,12 @@ def chat_api():
         except Exception as e:
             logger.error(f"WeCom Broadcast Failed: {e}")
 
-    return jsonify({"reply": reply})
+    return jsonify({
+        "reply": reply,
+        "target_agent": target_agent,
+        "routing_mode": routing_mode,
+        "mock_mode": not can_use_real_agents(),
+    })
 
 @app.route('/api/sandbox/messages', methods=['GET'])
 def get_sandbox_messages():
@@ -116,15 +182,12 @@ def send_sandbox_message():
 
 @app.route('/health')
 def health():
-    deps = {
-        "deepseek": bool(os.getenv("DEEPSEEK_API_KEY")),
-        "dashscope": bool(os.getenv("DASHSCOPE_API_KEY")),
-        "wecom_webhook": bool(os.getenv("WECOM_WEBHOOK_URL")),
-    }
-    all_ok = all(deps.values())
+    deps = dependency_status()
+    mock_mode = env_flag("AI_MOCK_MODE", default=True)
     return jsonify({
-        "status": "online" if all_ok else "degraded",
+        "status": resolve_health_status(deps, mock_mode=mock_mode),
         "engine": "DeepSeek-V3",
+        "mock_mode": mock_mode,
         "dependencies": deps,
         "sandbox_messages": len(sandbox_messages)
     })

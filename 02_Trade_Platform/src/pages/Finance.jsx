@@ -40,7 +40,7 @@ const FinancePage = () => {
       totalCost: totalCost.toFixed(0),
       apr
     };
-  }, [productType, amount, days, currentFactor]);
+  }, [amount, days, currentFactor]);
 
   const [showConsult, setShowConsult] = useState(false);
 

@@ -92,7 +92,6 @@ const CustomTooltip = ({ active, payload, label }) => {
 const MarketPage = ({ mode = 'prices' }) => {
   const { setActiveTab, setSelectedKBArticle } = useStore();
   const [activeProduct, setActiveProduct] = useState('zircon');
-  const [selectedPoint, setSelectedPoint] = useState(null);
   const [timeRange, setTimeRange] = useState('Quarter');
 
   const product = PRODUCTS.find(p => p.id === activeProduct);
@@ -212,11 +211,6 @@ const MarketPage = ({ mode = 'prices' }) => {
                   <AreaChart
                     data={filteredPriceData}
                     margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-                    onMouseMove={(state) => {
-                      if (state.activePayload) {
-                        setSelectedPoint(state.activePayload[0].payload);
-                      }
-                    }}
                   >
                     <defs>
                       <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
