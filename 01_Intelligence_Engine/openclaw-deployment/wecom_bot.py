@@ -1002,6 +1002,7 @@ def wecom_gateway():
             msg_type = msg_root.find("MsgType").text
             user_id = msg_root.find("FromUserName").text
             logger.info(f"[XML-App] Raw decrypted XML callback: type={msg_type}, user={user_id}")
+            logger.info(f"[XML-App] Decrypted XML content:\n{xml_content}")
 
             if msg_type == "text":
                 content = msg_root.find("Content").text
