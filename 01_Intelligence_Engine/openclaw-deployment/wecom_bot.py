@@ -809,8 +809,8 @@ def wecom_gateway():
                 if msg_type == "file":
                     file_info = msg_json.get("file", {})
                     media_id = file_info.get("media_id", "")
-                    file_title = file_info.get("title", "unknown")
-                    file_size = file_info.get("file_size", 0)
+                    file_title = file_info.get("title") or file_info.get("name") or "unknown"
+                    file_size = file_info.get("file_size") or file_info.get("size") or 0
                 elif msg_type == "image":
                     image_info = msg_json.get("image", {})
                     media_id = image_info.get("media_id", "")
