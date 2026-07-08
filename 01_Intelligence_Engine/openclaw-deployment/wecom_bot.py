@@ -7,6 +7,7 @@ import struct
 import logging
 import time
 import threading
+import asyncio
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -305,6 +306,98 @@ def create_notion_record(filename: str, category: str, sender: str, saved_path: 
         logger.error(f"[Notion] Error: {e}")
         return False
 
+DOC_CATEGORY_TO_TYPE = {
+    "invoice": "INVOICE",
+    "bill_of_lading": "BILL_OF_LADING",
+    "packing_list": "PACKING_LIST",
+    "certificate_of_origin": "CERTIFICATE_OF_ORIGIN",
+    "quality_inspection": "QUALITY_INSPECTION",
+    "contract": "CONTRACT",
+    "customs": "CUSTOMS",
+}
+
+def build_document_audit_report(user_id: str, doc_data: dict, category: str, source_name: str, saved_path: str = "") -> str:
+    """Store extracted fields, run Audit-Pro and Sentinel, and return a real audit report."""
+    if not audit_service:
+        return "⚠️ Audit-Pro 审单模块未加载，无法执行真实单证核验。"
+
+    if not doc_data:
+        return "⚠️ Docu-Checker 未能抽取到可核验字段，请上传更清晰的单证图片/PDF，或粘贴包含净重、单价、总金额、箱号等字段的文本。"
+
+    if user_id not in USER_DOCUMENT_SESSIONS:
+        USER_DOCUMENT_SESSIONS[user_id] = {}
+
+    doc_type_key = doc_data.get("type") or DOC_CATEGORY_TO_TYPE.get(category, category.upper())
+    doc_data["type"] = doc_type_key
+    USER_DOCUMENT_SESSIONS[user_id][doc_type_key] = doc_data
+
+    audit_result = asyncio.run(audit_service.run_full_audit(list(USER_DOCUMENT_SESSIONS[user_id].values())))
+    session_docs = USER_DOCUMENT_SESSIONS[user_id]
+    doc_types_str = ", ".join(session_docs.keys()) or "无"
+
+    extracted_summary = []
+    for dtype, ddata in session_docs.items():
+        parts = []
+        for key, label in [
+            ("net_weight", "净重"),
+            ("unit_price", "单价"),
+            ("total_amount", "总金额"),
+            ("latest_shipment_date", "最晚装运期"),
+            ("container_no", "箱号"),
+            ("seal_no", "封条号"),
+            ("shipper_name", "发货人"),
+            ("shipper_address", "发货人地址"),
+            ("consignee_name", "收货人"),
+            ("consignee_address", "收货人地址"),
+        ]:
+            if ddata.get(key) is not None:
+                parts.append(f"{label}: {ddata.get(key)}")
+        extracted_summary.append(f"📍 **{dtype}**:\n  - " + ("\n  - ".join(parts) if parts else "未抽取到关键字段"))
+
+    findings = audit_result.get("findings") or []
+    findings_str = "\n".join([f"- [{f.get('module', 'Audit-Pro')}] {f.get('finding', '')}" for f in findings])
+    if not findings_str:
+        findings_str = "- 未发现任何不符点或需要核对的内容。"
+
+    sentinel_result = audit_result.get("sentinel_result", {})
+    tactical_action = sentinel_result.get("tactical_action", "MANUAL_REVIEW")
+    final_risk_score = sentinel_result.get("final_risk_score", audit_result.get("risk_score", 0))
+    recommendations = "；".join(audit_result.get("recommendations", [])) or "建议人工复核后再付款"
+
+    if tactical_action == "KILL":
+        status_icon = "🚨"
+        status_title = "强制拦截付款"
+    elif tactical_action == "HOLD":
+        status_icon = "⚠️"
+        status_title = "建议挂起付款"
+    else:
+        status_icon = "✅"
+        status_title = "允许进入付款复核"
+
+    archive_line = f"\n👉 存档路径：{saved_path}" if saved_path else ""
+    return (
+        f"{status_icon} **Docu-Checker / Audit-Pro 真实审单报告（{status_title}）**\n"
+        f"来源：{source_name}\n"
+        f"当前缓存单证：{doc_types_str}\n\n"
+        f"📋 **Docu-Checker 字段抽取：**\n" + "\n".join(extracted_summary) + "\n\n"
+        f"🔍 **Audit-Pro 一致性检查：**\n{findings_str}\n\n"
+        f"🛡️ **Risk-Sentinel 付款风控：**\n"
+        f"- 动作：{tactical_action}\n"
+        f"- 综合风险分：{final_risk_score}/100\n"
+        f"- 付款建议：{recommendations}\n"
+        f"{archive_line}\n\n"
+        f"提示：继续上传/输入发票、提单、装箱单会自动进入同一审单缓存；发送“清空”或“重置”可开始新一轮。"
+    )
+
+def process_text_document_audit(user_message: str, user_id: str) -> str:
+    if not file_extractor:
+        return "⚠️ 文本抽取模块未加载，无法执行真实审单。"
+
+    info = smart_classify_by_content("pasted_document.txt", len(user_message.encode("utf-8")), user_message)
+    category = info["category"] if info["category"] != "other" else "invoice"
+    doc_data = file_extractor.extract_fields_from_text(user_message, category)
+    return build_document_audit_report(user_id, doc_data, category, "用户直接输入/粘贴的单证文本")
+
 def process_message_via_agents(user_message: str, user_id: str) -> str:
     """Route message through Jaguar and execute the target agent."""
     logger.info(f"[Pipeline] Step 1: Dispatching task for user {user_id}")
@@ -343,6 +436,9 @@ def process_message_via_agents(user_message: str, user_id: str) -> str:
 
     routing = factory.dispatch_task(user_message)
     target = routing.get("target_agent", "scout")
+    if target == "docu_checker":
+        logger.info("[Pipeline] Step 2: Running real text document audit pipeline")
+        return process_text_document_audit(user_message, user_id)
     
     # 将文件内容作为上下文拼入消息，让大模型直接感知文件内容并做比对
     extended_message = user_message

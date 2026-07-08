@@ -12,6 +12,11 @@ except ModuleNotFoundError as exc:
 else:
     RAG_IMPORT_ERROR = None
 
+try:
+    from risk_sentinel.risk_sentinel import RiskSentinelService
+except ModuleNotFoundError:
+    RiskSentinelService = None
+
 # Logger setup
 logger = logging.getLogger("zk_audit_pro")
 
@@ -96,6 +101,8 @@ class AuditProService:
                 results["overall_status"] = "DISCREPANCY_DETECTED"
                 results["risk_score"] += 30
 
+        await self._attach_sentinel_payment_decision(results)
+
         # 4. 如果发现高风险，立即通过 Handoff Manager 触发 Sentinel 重评
         if results["risk_score"] >= 40 and self.orchestrator:
             logger.warning(f"CRITICAL: Risk Score {results['risk_score']}! Triggering Sentinel via Orchestrator.")
@@ -103,6 +110,36 @@ class AuditProService:
             await self.orchestrator.handle_audit_discrepancy(packing_list_data=pl, bl_data=bl)
 
         return results
+
+    async def _attach_sentinel_payment_decision(self, results: Dict[str, Any]):
+        if RiskSentinelService is None:
+            results["sentinel_result"] = {
+                "final_risk_score": results.get("risk_score", 0),
+                "tactical_action": "MANUAL_REVIEW",
+                "deduction_summary": {"document_risk": results.get("risk_score", 0)},
+            }
+        else:
+            sentinel = RiskSentinelService()
+            results["sentinel_result"] = await sentinel.evaluate_trade_risk(
+                results,
+                {"trust_score": 100},
+            )
+
+        sentinel_result = results["sentinel_result"]
+        action = sentinel_result.get("tactical_action", "MANUAL_REVIEW")
+        score = sentinel_result.get("final_risk_score", results.get("risk_score", 0))
+        recommendation = {
+            "PASS": "允许付款",
+            "HOLD": "建议挂起付款，转人工复核",
+            "KILL": "强制拦截付款",
+        }.get(action, "转人工复核")
+
+        results["recommendations"].append(recommendation)
+        results["findings"].append({
+            "module": "Risk-Sentinel",
+            "finding": f"付款风控结论：{action}；综合风险分 {score}/100；建议：{recommendation}",
+            "severity": "CRITICAL" if action == "KILL" else "HIGH" if action == "HOLD" else "INFO",
+        })
 
     def _reconcile_weight_and_value(self, pl, bl, inv) -> List[Dict]:
         """

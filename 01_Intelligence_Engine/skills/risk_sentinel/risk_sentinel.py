@@ -38,7 +38,7 @@ class RiskSentinelService:
         # 2. 单证风险扣分 (基于 Audit-Pro)
         audit_deduction = 0
         if audit_results.get('overall_status') == 'DISCREPANCY_DETECTED':
-            audit_deduction = 30 * self.WEIGHTS["DOCUMENT_AUDIT"]
+            audit_deduction = max(audit_results.get("risk_score", 0), 30 * self.WEIGHTS["DOCUMENT_AUDIT"])
             logger.warning(f"🚨 Document Audit deduction: {audit_deduction}")
 
         # 3. 市场波动风险扣分 (基于 Market-Scout)
@@ -52,9 +52,9 @@ class RiskSentinelService:
         # 5. 决定战术动作 (Action Determinator)
         action = "PASS"
         if total_risk_score > 60:
-            action = "KILL (熔断)"
-        elif total_risk_score > 30:
-            action = "HOLD (待复核)"
+            action = "KILL"
+        elif total_risk_score >= 30:
+            action = "HOLD"
         
         report = {
             "final_risk_score": total_risk_score,
@@ -68,7 +68,7 @@ class RiskSentinelService:
         }
 
         # 6. 如果结果是 KILL，同步通知指挥官
-        if action == "KILL (熔断)" and self.orchestrator:
+        if action == "KILL" and self.orchestrator:
              logger.critical(f"🔥🔥🔥 [Risk-Sentinel] CRITICAL RISK DETECTED ({total_risk_score}/100). STOPPING TRADE.")
              # 调用 Handoff 指令，下令给邮件專家准备“拒绝函”草稿
              
