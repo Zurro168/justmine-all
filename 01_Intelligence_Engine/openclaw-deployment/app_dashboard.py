@@ -3,6 +3,7 @@ import os
 import json
 import logging
 import sys
+import importlib.util
 from pathlib import Path
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -44,11 +45,15 @@ def secret_status(value):
         return "placeholder"
     return "configured"
 
+def package_status(package_name):
+    return "configured" if importlib.util.find_spec(package_name) else "missing"
+
 def dependency_status():
     return {
         "deepseek": secret_status(os.getenv("DEEPSEEK_API_KEY")),
         "dashscope": secret_status(os.getenv("DASHSCOPE_API_KEY")),
         "wecom_webhook": secret_status(os.getenv("WECOM_WEBHOOK_URL")),
+        "chromadb": package_status("chromadb"),
     }
 
 def resolve_health_status(deps, mock_mode=False):

@@ -30,6 +30,12 @@ class AgentConfigTests(unittest.TestCase):
         self.assertEqual(app_dashboard.resolve_health_status(deps, mock_mode=True), "mock")
         self.assertEqual(app_dashboard.resolve_health_status(deps, mock_mode=False), "degraded")
 
+    def test_dependency_status_reports_audit_pro_vector_store(self):
+        deps = app_dashboard.dependency_status()
+
+        self.assertIn("chromadb", deps)
+        self.assertEqual(app_dashboard.package_status("definitely_missing_package_for_test"), "missing")
+
     def test_agent_aliases_normalize_to_config_keys(self):
         factory = OpenClawAgentFactory()
 

@@ -3,7 +3,14 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, Any, List
-from .rag_indexer import ZhengkuangRAG
+
+try:
+    from .rag_indexer import ZhengkuangRAG
+except ModuleNotFoundError as exc:
+    ZhengkuangRAG = None
+    RAG_IMPORT_ERROR = exc
+else:
+    RAG_IMPORT_ERROR = None
 
 # Logger setup
 logger = logging.getLogger("zk_audit_pro")
@@ -15,9 +22,18 @@ class AuditProService:
     """
     
     def __init__(self, orchestrator=None):
-        self.rag = ZhengkuangRAG()
+        self.rag = None
+        self.rag_enabled = False
+        if ZhengkuangRAG is not None:
+            try:
+                self.rag = ZhengkuangRAG()
+                self.rag_enabled = True
+            except Exception as exc:
+                logger.warning("Audit-Pro RAG disabled: %s", exc)
+        elif RAG_IMPORT_ERROR is not None:
+            logger.warning("Audit-Pro RAG disabled: %s", RAG_IMPORT_ERROR)
         self.orchestrator = orchestrator # Linked Handoff Manager
-        logger.info("Audit-Pro Service V2.0 initialized with Cross-Reconciler.")
+        logger.info("Audit-Pro Service V2.0 initialized with Cross-Reconciler. RAG enabled: %s", self.rag_enabled)
 
     async def run_full_audit(self, documents: List[Dict[str, Any]], current_date: str = None):
         """

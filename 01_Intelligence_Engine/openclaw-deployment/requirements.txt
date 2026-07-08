@@ -16,3 +16,4 @@ pycryptodome
 pypdf
 python-docx
 pdf2image
+chromadb
