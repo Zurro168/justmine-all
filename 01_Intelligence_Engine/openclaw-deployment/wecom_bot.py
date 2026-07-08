@@ -398,9 +398,60 @@ def process_text_document_audit(user_message: str, user_id: str) -> str:
     doc_data = file_extractor.extract_fields_from_text(user_message, category)
     return build_document_audit_report(user_id, doc_data, category, "用户直接输入/粘贴的单证文本")
 
+def recover_recent_files_from_disk(user_id: str):
+    """从磁盘归档目录中恢复该用户最近上传的文件缓存（防止容器重启丢失缓存）"""
+    if user_id in USER_RECENT_FILES and USER_RECENT_FILES[user_id]:
+        return
+    
+    logger.info(f"[Cache] USER_RECENT_FILES is empty, scanning disk archive for user {user_id}...")
+    found_files = []
+    
+    if os.path.exists(ARCHIVE_ROOT):
+        for root, _, files in os.walk(ARCHIVE_ROOT):
+            for file in files:
+                # 检查文件名中是否包含 "_发件人_" 标识
+                prefix = f"_{user_id}_"
+                if prefix in file:
+                    full_path = os.path.join(root, file)
+                    try:
+                        mtime = os.path.getmtime(full_path)
+                        size = os.path.getsize(full_path)
+                        
+                        # 还原原始文件名: 去掉哈希和前缀
+                        idx = file.find(prefix)
+                        remaining = file[idx + len(prefix):]
+                        orig_name = remaining[9:] if len(remaining) > 9 else file
+                        
+                        found_files.append({
+                            "path": full_path,
+                            "filename": orig_name,
+                            "size": size,
+                            "mtime": mtime
+                        })
+                    except Exception as e:
+                        logger.error(f"[Cache] Error checking archived file {file}: {e}")
+                        
+    if found_files:
+        # 按修改时间从新到旧排序
+        found_files.sort(key=lambda x: x["mtime"], reverse=True)
+        # 取最近 5 个文件，并反转（让旧的在前，匹配上传时序）
+        recent = found_files[:5]
+        recent.reverse()
+        
+        USER_RECENT_FILES[user_id] = [
+            {"path": f["path"], "filename": f["filename"], "size": f["size"]}
+            for f in recent
+        ]
+        # 填充最近一个文件
+        USER_LAST_FILE[user_id] = USER_RECENT_FILES[user_id][-1]
+        logger.info(f"[Cache] Successfully recovered {len(USER_RECENT_FILES[user_id])} files from disk for {user_id}: {[f['filename'] for f in USER_RECENT_FILES[user_id]]}")
+
 def process_message_via_agents(user_message: str, user_id: str) -> str:
     """Route message through Jaguar and execute the target agent."""
     logger.info(f"[Pipeline] Step 1: Dispatching task for user {user_id}")
+    
+    # 尝试自动恢复磁盘缓存
+    recover_recent_files_from_disk(user_id)
     
     # 获取用户最近上传的所有文件文本内容，并作为上下文喂给大模型
     recent_files_context = ""
