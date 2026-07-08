@@ -11,12 +11,20 @@ if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
 # Load configuration
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "scout_config.json")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE_DIR, "scout_config.json")
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     CONFIG = json.load(f)
 
-DATA_DIR = CONFIG["output_paths"].get("data_dir", "../data/scout")
-HISTORY_FILE = CONFIG["output_paths"].get("history_csv", os.path.join(DATA_DIR, "market_indices_history.csv"))
+
+def resolve_output_path(path_value):
+    if os.path.isabs(path_value):
+        return os.path.normpath(path_value)
+    return os.path.normpath(os.path.join(BASE_DIR, path_value))
+
+
+DATA_DIR = resolve_output_path(CONFIG["output_paths"].get("data_dir", "../data/scout"))
+HISTORY_FILE = resolve_output_path(CONFIG["output_paths"].get("history_csv", os.path.join(DATA_DIR, "market_indices_history.csv")))
 INDICES = CONFIG.get("market_indices", {})
 HISTORY_YEARS = CONFIG.get("history_years", 3)
 

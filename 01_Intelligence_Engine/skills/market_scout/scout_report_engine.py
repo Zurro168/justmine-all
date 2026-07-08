@@ -9,14 +9,36 @@ if sys.platform == 'win32':
     sys.stdout.reconfigure(encoding='utf-8')
 
 # Load configuration
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "scout_config.json")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE_DIR, "scout_config.json")
 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
     CONFIG = json.load(f)
 
-DATA_DIR = CONFIG["output_paths"].get("data_dir", "data/scout")
-HISTORY_FILE = CONFIG["output_paths"].get("history_csv", os.path.join(DATA_DIR, "market_indices_history.csv"))
-REPORTS_DIR = CONFIG["output_paths"].get("report_dir", "logs/scout_reports")
-EXCEL_DIR = CONFIG["output_paths"].get("excel_dir", "data/scout/excel")
+PLACEHOLDER_MARKERS = ("__REPLACE", "REPLACE_WITH", "YOUR_", "YOUR-", "PLACEHOLDER", "TODO", "SK-...")
+
+
+def resolve_output_path(path_value):
+    if os.path.isabs(path_value):
+        return os.path.normpath(path_value)
+    return os.path.normpath(os.path.join(BASE_DIR, path_value))
+
+
+def is_configured_secret(value):
+    if not value or not str(value).strip():
+        return False
+    normalized = str(value).strip()
+    upper_value = normalized.upper()
+    return not any(marker in upper_value for marker in PLACEHOLDER_MARKERS)
+
+
+def push_status_name(push_success):
+    return "已推送" if push_success else "未推送"
+
+
+DATA_DIR = resolve_output_path(CONFIG["output_paths"].get("data_dir", "data/scout"))
+HISTORY_FILE = resolve_output_path(CONFIG["output_paths"].get("history_csv", os.path.join(DATA_DIR, "market_indices_history.csv")))
+REPORTS_DIR = resolve_output_path(CONFIG["output_paths"].get("report_dir", "logs/scout_reports"))
+EXCEL_DIR = resolve_output_path(CONFIG["output_paths"].get("excel_dir", "data/scout/excel"))
 INDICES = CONFIG.get("market_indices", {})
 NEWS_SOURCES = CONFIG.get("news_sources", {})
 
@@ -104,7 +126,7 @@ async def generate_daily_scout_report():
     load_dotenv(env_path)
     
     api_key = os.getenv("DEEPSEEK_API_KEY")
-    if api_key:
+    if is_configured_secret(api_key):
         try:
             headers = {
                 "Authorization": f"Bearer {api_key}",
@@ -157,8 +179,9 @@ async def generate_daily_scout_report():
         f.write(final_report)
 
     # 推送到企微 Webhook (Kit 群)
+    wecom_push_success = False
     wecom_webhook = os.getenv("WECOM_WEBHOOK_URL")
-    if wecom_webhook and wecom_webhook.startswith("http"):
+    if is_configured_secret(wecom_webhook) and wecom_webhook.startswith("http"):
         try:
             wecom_headers = {
                 "Content-Type": "application/json",
@@ -168,7 +191,15 @@ async def generate_daily_scout_report():
             async with httpx.AsyncClient() as client:
                 res = await client.post(wecom_webhook, headers=wecom_headers, json=payload, timeout=10.0)
                 if res.status_code == 200:
-                    print(f"[{datetime.now()}] Report pushed to Kit group.")
+                    try:
+                        response_json = res.json()
+                        wecom_push_success = response_json.get("errcode", 0) == 0
+                    except Exception:
+                        wecom_push_success = True
+                    if wecom_push_success:
+                        print(f"[{datetime.now()}] Report pushed to Kit group.")
+                    else:
+                        print(f"[{datetime.now()}] Push rejected by WeCom: {res.text}")
                 else:
                     print(f"[{datetime.now()}] Push failed: {res.status_code} - {res.text}")
         except Exception as e:
@@ -179,7 +210,7 @@ async def generate_daily_scout_report():
     # 推送到 Notion Scout 数据库
     notion_api_key = os.getenv("NOTION_API_KEY")
     notion_db_id = os.getenv("NOTION_SCOUT_DATABASE_ID")
-    if notion_api_key and notion_db_id:
+    if is_configured_secret(notion_api_key) and is_configured_secret(notion_db_id):
         try:
             # 提取 AI 研判内容（去掉前面的行情数据）
             ai_only = ai_insight if ai_insight and not ai_insight.startswith("AI 分析") else "无"
@@ -191,7 +222,7 @@ async def generate_daily_scout_report():
                     "日期": {"date": {"start": latest_date.strftime("%Y-%m-%d")}},
                     "行情数据": {"rich_text": [{"text": {"content": all_data_text[:2000]}}]},
                     "AI行情研判": {"rich_text": [{"text": {"content": ai_only[:2000]}}]},
-                    "推送状态": {"select": {"name": "已推送" if wecom_webhook and wecom_webhook.startswith("http") else "未推送"}},
+                    "推送状态": {"select": {"name": push_status_name(wecom_push_success)}},
                     "创建时间": {"date": {"start": datetime.now(timezone.utc).isoformat()}},
                 }
             }
@@ -206,7 +237,7 @@ async def generate_daily_scout_report():
                     json=payload,
                     timeout=15.0
                 )
-                if res.status_code == 200:
+                if res.status_code in (200, 201):
                     print(f"[{datetime.now()}] Scout report archived to Notion.")
                 else:
                     print(f"[{datetime.now()}] Notion archive failed: {res.status_code} - {res.text}")

@@ -11,7 +11,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from scout_collector import run_scout_collection
 from scout_playwright_collector import run_playwright_collection
-from scout_report_engine import generate_daily_scout_report, generate_monthly_summary_excel
+from scout_report_engine import HISTORY_FILE, generate_daily_scout_report, generate_monthly_summary_excel
 
 async def daily_task_flow():
     print(f"[{datetime.now()}] Starting scheduled Scout market data task...")
@@ -38,7 +38,10 @@ async def daily_task_flow():
         # Don't crash — continue to report generation
 
     # 3. 生成日报（只要有公开数据就生成）
-    if public_ok:
+    has_cached_history = os.path.exists(HISTORY_FILE)
+    if public_ok or has_cached_history:
+        if not public_ok:
+            print(f"[{datetime.now()}] [Step 3] Public collection failed; using cached history: {HISTORY_FILE}")
         try:
             print(f"[{datetime.now()}] [Step 3] Generating daily report...")
             md_report = await generate_daily_scout_report()
