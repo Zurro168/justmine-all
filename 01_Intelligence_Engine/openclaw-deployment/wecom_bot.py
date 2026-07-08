@@ -436,7 +436,11 @@ def process_message_via_agents(user_message: str, user_id: str) -> str:
 
     routing = factory.dispatch_task(user_message)
     target = routing.get("target_agent", "scout")
-    if target == "docu_checker":
+    
+    # 判断是否为用户直接在聊天中粘贴单证文本进行审核（通常文本较长，且没有新上传的文件缓存）
+    is_pasted_doc = len(user_message) > 300 or not recent_files
+    
+    if target == "docu_checker" and is_pasted_doc:
         logger.info("[Pipeline] Step 2: Running real text document audit pipeline")
         return process_text_document_audit(user_message, user_id)
     
